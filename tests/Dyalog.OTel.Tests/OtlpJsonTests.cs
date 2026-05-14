@@ -134,7 +134,8 @@ public class OtlpJsonTests
         };
         var dest = Destinations.DestinationFactory.Create(config);
         Assert.NotNull(dest);
-        Assert.IsType<OtlpJsonDestination>(dest);
+        // Default OTLP protocol is protobuf
+        Assert.IsType<OtlpProtobufDestination>(dest);
         dest!.Dispose();
     }
 
@@ -160,7 +161,8 @@ public class OtlpJsonTests
             Properties = new()
             {
                 ["endpoint"] = "http://localhost:4318",
-                ["headers"] = "Authorization=Bearer token123, X-Custom=value"
+                ["headers"] = "Authorization=Bearer token123, X-Custom=value",
+                ["protocol"] = "json"
             }
         };
         var dest = Destinations.DestinationFactory.Create(config);

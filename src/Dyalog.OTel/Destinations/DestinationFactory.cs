@@ -20,7 +20,7 @@ internal static class DestinationFactory
         };
     }
 
-    private static OtlpJsonDestination CreateOtlp(DestinationConfig config)
+    private static IDestination CreateOtlp(DestinationConfig config)
     {
         string endpoint = config.Properties.GetValueOrDefault("endpoint", "http://localhost:4318");
         Dictionary<string, string>? headers = null;
@@ -34,7 +34,17 @@ internal static class DestinationFactory
                     headers[pair[..eq].Trim()] = pair[(eq + 1)..].Trim();
             }
         }
-        return new OtlpJsonDestination(endpoint, headers);
+
+        string protocol = config.Properties.GetValueOrDefault("protocol", "")!;
+        if (string.IsNullOrEmpty(protocol))
+            protocol = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_PROTOCOL") ?? "";
+
+        return protocol.ToLowerInvariant() switch
+        {
+            "json" or "http/json" => new OtlpJsonDestination(endpoint, headers),
+            "protobuf" or "grpc" or "http/protobuf" => new OtlpProtobufDestination(endpoint, headers),
+            _ => new OtlpProtobufDestination(endpoint, headers) // protobuf is the OTLP default
+        };
     }
 
     private static IDestination? UnknownType(string type)
