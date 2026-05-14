@@ -36,12 +36,12 @@ public static class LogExports
         // Parse message template and extract attributes from fillers
         OTelAttribute[]? attributes = null;
         var parsed = TemplateCache.Instance.GetOrParse(body);
-        if (parsed.HasPlaceholders && attrs.HasValue)
+        if (parsed.HasPlaceholders && attrs.HasValue && attrs.Bound() > 0)
         {
             // Positional fillers mode: attrs contains values, template has names
             attributes = ExportHelpers.ReadFillers(attrs, parsed.PlaceholderNames);
         }
-        else if (attrs.HasValue && attrs.IsNested())
+        else if (attrs.HasValue && attrs.Bound() > 0 && attrs.IsNested())
         {
             // Key-value pairs mode
             attributes = ExportHelpers.ReadAttributes(attrs);
@@ -83,9 +83,9 @@ public static class LogExports
 
         OTelAttribute[]? attributes = null;
         var parsed = TemplateCache.Instance.GetOrParse(body);
-        if (parsed.HasPlaceholders && attrs.HasValue)
+        if (parsed.HasPlaceholders && attrs.HasValue && attrs.Bound() > 0)
             attributes = ExportHelpers.ReadFillers(attrs, parsed.PlaceholderNames);
-        else if (attrs.HasValue && attrs.IsNested())
+        else if (attrs.HasValue && attrs.Bound() > 0 && attrs.IsNested())
             attributes = ExportHelpers.ReadAttributes(attrs);
 
         // Resolve span context for correlation

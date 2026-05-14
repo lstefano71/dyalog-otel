@@ -22,6 +22,7 @@ public sealed class Pipeline : IDisposable
     private readonly Thread _metricConsumer;
 
     private readonly CancellationTokenSource _cts = new();
+    private CancellationTokenSource _wakeCts = new(); // cancelled to interrupt consumer waits
     private readonly ManualResetEventSlim _logFlushed = new(false);
     private readonly ManualResetEventSlim _spanFlushed = new(false);
     private readonly ManualResetEventSlim _metricFlushed = new(false);
@@ -167,6 +168,8 @@ public sealed class Pipeline : IDisposable
         return false;
     }
 
+    private volatile int _flushRequested; // 0 = no, 1 = yes
+
     // ── Flush / Shutdown ──
 
     public void Flush()
@@ -175,16 +178,20 @@ public sealed class Pipeline : IDisposable
         _spanFlushed.Reset();
         _metricFlushed.Reset();
 
-        // Signal consumers to flush by completing the channels temporarily?
-        // Simpler: consumers check a flush flag periodically.
-        // For now, complete channels and wait.
-        _logChannel.Writer.TryComplete();
-        _spanChannel.Writer.TryComplete();
-        _metricChannel.Writer.TryComplete();
+        // Signal consumers to drain and report
+        Volatile.Write(ref _flushRequested, 1);
+
+        // Wake consumers that are blocked in WaitToReadAsync
+        var old = Interlocked.Exchange(ref _wakeCts, new CancellationTokenSource());
+        old.Cancel();
+        old.Dispose();
 
         _logFlushed.Wait(TimeSpan.FromSeconds(30));
         _spanFlushed.Wait(TimeSpan.FromSeconds(30));
         _metricFlushed.Wait(TimeSpan.FromSeconds(30));
+
+        // Clear the flag so consumers resume normal operation
+        Volatile.Write(ref _flushRequested, 0);
 
         foreach (var d in _destinations)
             d.Flush();
@@ -193,6 +200,8 @@ public sealed class Pipeline : IDisposable
     public void Shutdown()
     {
         _cts.Cancel();
+        // Wake any consumers blocked in WaitToReadAsync
+        try { _wakeCts.Cancel(); } catch { }
         _logChannel.Writer.TryComplete();
         _spanChannel.Writer.TryComplete();
         _metricChannel.Writer.TryComplete();
@@ -233,13 +242,18 @@ public sealed class Pipeline : IDisposable
                 // Wait for at least one item or timeout
                 try
                 {
-                    if (reader.WaitToReadAsync(token).AsTask().Wait(intervalMs, token))
+                    // Use wake token so Flush() can interrupt this wait
+                    var wake = _wakeCts.Token;
+                    using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, wake);
+                    if (reader.WaitToReadAsync(linked.Token).AsTask().Wait(intervalMs, linked.Token))
                     {
                         while (batch.Count < maxBatchSize && reader.TryRead(out var item))
                             batch.Add(item);
                     }
                 }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested) { /* wake for flush */ }
                 catch (OperationCanceledException) { break; }
+                catch (AggregateException ex) when (ex.InnerException is OperationCanceledException && !token.IsCancellationRequested) { /* wake for flush */ }
                 catch (AggregateException ex) when (ex.InnerException is OperationCanceledException) { break; }
 
                 if (batch.Count > 0)
@@ -253,9 +267,27 @@ public sealed class Pipeline : IDisposable
                         Metrics.ExportError();
                     }
                 }
+
+                // Check flush flag: drain remaining and signal
+                if (Volatile.Read(ref _flushRequested) == 1)
+                {
+                    batch.Clear();
+                    while (reader.TryRead(out var extra))
+                        batch.Add(extra);
+                    if (batch.Count > 0)
+                    {
+                        try { writeBatch(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(batch)); }
+                        catch { Metrics.ExportError(); }
+                    }
+                    flushedEvent.Set();
+                    // Spin-wait until flush is acknowledged (reset by Flush caller)
+                    while (Volatile.Read(ref _flushRequested) == 1 && !token.IsCancellationRequested)
+                        Thread.Sleep(1);
+                }
             }
 
             // Drain remaining items after cancellation/completion
+            batch.Clear();
             while (reader.TryRead(out var remaining))
                 batch.Add(remaining);
 

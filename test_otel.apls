@@ -1,0 +1,130 @@
+#!/usr/local/bin/dyalogscript
+⍝ Integration test for dyalog-otel
+⍝ Tests the DWA exports end-to-end: init → log → span → metric → stats → shutdown
+⍝
+⍝ Usage:  .\run_apl.ps1 test_otel.apls
+
+⎕IO←0 ⋄ ⎕ML←1
+
+dll←'##DLLPATH##'
+
+pass←0 ⋄ fail←0
+check←{(name exp got)←⍵ ⋄ exp≡got:⊢(pass+←1)⊢⎕←'  ✓ ',name ⋄ ⊢(fail+←1)⊢⎕←'  ✗ ',name,' — exp ',(⍕exp),' got ',⍕got}
+
+⎕←'=== dyalog-otel Integration Tests ==='
+
+⍝ --- Version ---
+⎕←'Version:'
+⎕NA dll,'|pp_otel_version >PP'
+ver←pp_otel_version 0
+_←check 'version is string' 1 (0<≢ver)
+_←check 'version content' 1 (∨/'0.1.0'⍷ver)
+
+⍝ --- Init (lazy singleton) ---
+⎕←'Init:'
+⎕NA dll,'|pp_otel_init >PP'
+h←pp_otel_init 0
+_←check 'init returns 0' 0 h
+
+⍝ --- Status ---
+⎕←'Status:'
+⎕NA dll,'|pp_otel_status I4 >PP'
+st←pp_otel_status 0 0
+_←check 'status is healthy' 0 st
+
+⍝ --- Log (plain text, no template, no attrs) ---
+⎕←'Log:'
+⎕NA dll,'|pp_otel_log I4 I4 <PP <PP <PP'
+pp_otel_log 0 9 'Hello from APL' '' ⍬
+_←check 'log plain (no error)' 1 1
+
+⍝ --- Log with message template ---
+⎕←'Log with template:'
+pp_otel_log 0 9 'Order {OrderId} placed for {Amount}' '' (42 99.5)
+_←check 'log template (no error)' 1 1
+
+⍝ --- Span start/end ---
+⎕←'Span:'
+⎕NA dll,'|pp_otel_span_start I4 <PP I4 <PP <PP >PP'
+⎕NA dll,'|pp_otel_span_end I4 I4 <PP <PP'
+sh←pp_otel_span_start 0 'test-operation' 0 '' ⍬ 0
+_←check 'span handle > 0' 1 (sh>0)
+pp_otel_span_end 0 sh '' ⍬
+_←check 'span end (no error)' 1 1
+
+⍝ --- Log correlated with span ---
+⎕←'Log + Span correlation:'
+⎕NA dll,'|pp_otel_log_span I4 I4 <PP I4 <PP <PP'
+sh2←pp_otel_span_start 0 'parent-op' 0 '' ⍬ 0
+pp_otel_log_span 0 9 'Event inside span' sh2 '' ⍬
+_←check 'log_span (no error)' 1 1
+pp_otel_span_end 0 sh2 '' ⍬
+
+⍝ --- Nested spans ---
+⎕←'Nested spans:'
+root←pp_otel_span_start 0 'root' 0 '' ⍬ 0
+child←pp_otel_span_start 0 'child' root '' ⍬ 0
+_←check 'child handle ≠ root' 1 (child≠root)
+pp_otel_span_end 0 child '' ⍬
+pp_otel_span_end 0 root '' ⍬
+_←check 'nested spans (no error)' 1 1
+
+⍝ --- Metric ---
+⎕←'Metric:'
+⎕NA dll,'|pp_otel_metric I4 <PP <PP I4 <PP <PP'
+pp_otel_metric 0 'requests.count' (,1) 0 '' ⍬
+_←check 'counter (no error)' 1 1
+pp_otel_metric 0 'cpu.usage' (,72.5) 1 '' ⍬
+_←check 'gauge (no error)' 1 1
+pp_otel_metric 0 'request.duration' (,150.3) 2 '' ⍬
+_←check 'histogram (no error)' 1 1
+
+⍝ --- Stats ---
+⎕←'Stats:'
+⎕NA dll,'|pp_otel_stats I4 >PP'
+raw←pp_otel_stats 0 0
+_←check 'stats is 9-element' 9 (≢raw)
+stats←3 3⍴raw
+_←check 'logs enqueued > 0' 1 (0<stats[0;0])
+_←check 'spans enqueued > 0' 1 (0<stats[1;0])
+_←check 'metrics enqueued > 0' 1 (0<stats[2;0])
+⎕←'  Stats matrix (log/span/metric × enq/exp/drop):'
+⎕←stats
+
+⍝ --- Template create ---
+⎕←'Templates:'
+⎕NA dll,'|pp_otel_tpl_create I4 <PP <PP'
+pp_otel_tpl_create 0 'base' ('service' 'OrderService' 'version' '1.0')
+_←check 'tpl create (no error)' 1 1
+
+⍝ --- Log with template name ---
+pp_otel_log 0 9 'Using template' 'base' ⍬
+_←check 'log with tpl name (no error)' 1 1
+
+⍝ --- Template delete ---
+⎕NA dll,'|pp_otel_tpl_delete I4 <PP'
+pp_otel_tpl_delete 0 'base'
+_←check 'tpl delete (no error)' 1 1
+
+⍝ --- Flush ---
+⎕←'Flush:'
+⎕NA dll,'|pp_otel_flush I4'
+pp_otel_flush 0
+_←check 'flush (no error)' 1 1
+
+⍝ Check stats after flush — exported counts should have increased
+raw2←pp_otel_stats 0 0
+stats2←3 3⍴raw2
+⎕←'  Stats after flush:'
+⎕←stats2
+_←check 'logs exported after flush' 1 (0<stats2[0;1])
+
+⍝ --- Shutdown ---
+⎕←'Shutdown:'
+⎕NA dll,'|pp_otel_shutdown I4'
+pp_otel_shutdown 0
+_←check 'shutdown (no error)' 1 1
+
+⎕←''
+⎕←'=== Results: ',(⍕pass),' passed, ',(⍕fail),' failed ==='
+⎕OFF fail>0

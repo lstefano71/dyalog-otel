@@ -11,21 +11,21 @@ internal static class ExportHelpers
 {
     /// <summary>
     /// Read a nested APL array as key-value attribute pairs.
-    /// Expected format: nested vector where each element is a 2-element nested vector (key, value).
-    /// APL: ('key1' val1)('key2' val2)...
+    /// Expected format: flat nested vector with alternating keys and values.
+    /// APL: 'key1' val1 'key2' val2
     /// </summary>
     public static OTelAttribute[]? ReadAttributes(Localp attrs)
     {
         if (!attrs.HasValue) return null;
 
-        int count = attrs.Bound();
-        if (count == 0) return null;
+        int bound = attrs.Bound();
+        if (bound < 2) return null;
 
-        // Each element is a 2-element nested vector: (key value)
-        var result = new OTelAttribute[count];
-        for (int i = 0; i < count; i++)
+        int pairCount = bound / 2;
+        var result = new OTelAttribute[pairCount];
+        for (int i = 0; i < pairCount; i++)
         {
-            string key = attrs.ReadString(i * 2);     // flat: key1 val1 key2 val2 ...
+            string key = attrs.ReadString(i * 2);
             object value = ReadValue(attrs, i * 2 + 1);
             result[i] = new OTelAttribute(key, value);
         }
@@ -44,17 +44,28 @@ internal static class ExportHelpers
 
     /// <summary>
     /// Read positional fillers for message template expansion.
-    /// attrs contains plain values (not key-value pairs), matched
-    /// positionally with placeholder names from the template.
+    /// attrs can be a simple numeric vector or a nested vector of mixed values.
     /// </summary>
     public static OTelAttribute[] ReadFillers(Localp attrs, string[] placeholderNames)
     {
         int count = Math.Min(attrs.Bound(), placeholderNames.Length);
         var result = new OTelAttribute[count];
-        for (int i = 0; i < count; i++)
+
+        if (attrs.IsSimple())
         {
-            object value = ReadValue(attrs, i);
-            result[i] = new OTelAttribute(placeholderNames[i], value);
+            // Simple numeric vector: read all as doubles
+            var doubles = attrs.ReadAsDoubles();
+            for (int i = 0; i < count; i++)
+                result[i] = new OTelAttribute(placeholderNames[i], doubles[i]);
+        }
+        else
+        {
+            // Nested: each element can be a different type
+            for (int i = 0; i < count; i++)
+            {
+                object value = ReadValue(attrs, i);
+                result[i] = new OTelAttribute(placeholderNames[i], value);
+            }
         }
         return result;
     }
