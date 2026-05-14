@@ -80,6 +80,14 @@ public static class LifecycleExports
     }
 
     /// <summary>
+    /// pp_otel_noop — does nothing; measures bare DWA call overhead.
+    /// </summary>
+    [DwaExport("pp_otel_noop")]
+    public static void Noop()
+    {
+    }
+
+    /// <summary>
     /// pp_otel_add_dest pipeline type params
     /// Builder-phase: add a destination before start.
     /// </summary>

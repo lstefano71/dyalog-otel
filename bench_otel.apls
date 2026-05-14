@@ -34,6 +34,7 @@ fmt←{
 
 ⍝ --- Init ---
 ⎕NA dll,'|pp_otel_init >PP'
+⎕NA dll,'|pp_otel_noop'
 ⎕NA dll,'|pp_otel_log I4 I4 <PP <PP <PP'
 ⎕NA dll,'|pp_otel_log_span I4 I4 <PP I4 <PP <PP'
 ⎕NA dll,'|pp_otel_span_start I4 <PP I4 <PP <PP >PP'
@@ -45,7 +46,16 @@ fmt←{
 
 _←pp_otel_init 0
 
-⍝ ── 1. Baseline: bare loop with assignment ──
+⍝ ── 1. DWA call floor: no-op export (bare ⎕NA round-trip) ──
+t0←now ⍬
+:For i :In ⍳N
+    pp_otel_noop
+:EndFor
+t1←now ⍬
+noop_us←t1-t0
+⎕←'DWA noop (call floor):   ',fmt N noop_us
+
+⍝ ── 2. Baseline: bare loop with assignment ──
 t0←now ⍬
 :For i :In ⍳N
     _←i×2
@@ -54,7 +64,7 @@ t1←now ⍬
 base_us←t1-t0
 ⎕←'Baseline (loop+assign):  ',fmt N base_us
 
-⍝ ── 2. Plain log (no template, no attrs) ──
+⍝ ── 3. Plain log (no template, no attrs) ──
 t0←now ⍬
 :For i :In ⍳N
     pp_otel_log 0 9 'Benchmark message' '' ⍬
@@ -63,7 +73,7 @@ t1←now ⍬
 log_us←t1-t0
 ⎕←'Log (plain):             ',fmt N log_us
 
-⍝ ── 3. Log with message template + fillers ──
+⍝ ── 4. Log with message template + fillers ──
 t0←now ⍬
 :For i :In ⍳N
     pp_otel_log 0 9 'Order {OrderId} total {Amount}' '' (42 99.5)
@@ -72,7 +82,7 @@ t1←now ⍬
 tpl_us←t1-t0
 ⎕←'Log (template+fillers):  ',fmt N tpl_us
 
-⍝ ── 4. Log with key-value attrs ──
+⍝ ── 5. Log with key-value attrs ──
 t0←now ⍬
 :For i :In ⍳N
     pp_otel_log 0 9 'Event with attrs' '' ('user' 'alice' 'action' 'login')
@@ -81,7 +91,7 @@ t1←now ⍬
 attr_us←t1-t0
 ⎕←'Log (key-value attrs):   ',fmt N attr_us
 
-⍝ ── 5. Span start + end ──
+⍝ ── 6. Span start + end ──
 t0←now ⍬
 :For i :In ⍳N
     h←pp_otel_span_start 0 'bench-op' 0 '' ⍬ 0
@@ -91,7 +101,7 @@ t1←now ⍬
 span_us←t1-t0
 ⎕←'Span (start+end):        ',fmt N span_us
 
-⍝ ── 6. Metric counter ──
+⍝ ── 7. Metric counter ──
 t0←now ⍬
 :For i :In ⍳N
     pp_otel_metric 0 'bench.counter' (,1) 0 '' ⍬
@@ -114,13 +124,22 @@ drops←+/stats[;2]
 
 ⍝ ── Summary ──
 ⎕←''
-⎕←'─── Overhead (net of baseline) ───'
+⎕←'─── Overhead (net of loop baseline) ───'
 net←{(⍵-base_us)÷N}
-⎕←'  Log plain:       ',(2⍕net log_us),'µs'
-⎕←'  Log template:    ',(2⍕net tpl_us),'µs'
-⎕←'  Log attrs:       ',(2⍕net attr_us),'µs'
-⎕←'  Span start+end:  ',(2⍕net span_us),'µs'
-⎕←'  Metric counter:  ',(2⍕net met_us),'µs'
+⎕←'  DWA noop:         ',(2⍕net noop_us),'µs'
+⎕←'  Log plain:        ',(2⍕net log_us),'µs'
+⎕←'  Log template:     ',(2⍕net tpl_us),'µs'
+⎕←'  Log attrs:        ',(2⍕net attr_us),'µs'
+⎕←'  Span start+end:   ',(2⍕net span_us),'µs'
+⎕←'  Metric counter:   ',(2⍕net met_us),'µs'
+⎕←''
+⎕←'─── Library cost (net of noop floor) ───'
+lib←{(⍵-noop_us)÷N}
+⎕←'  Log plain:        ',(2⍕lib log_us),'µs'
+⎕←'  Log template:     ',(2⍕lib tpl_us),'µs'
+⎕←'  Log attrs:        ',(2⍕lib attr_us),'µs'
+⎕←'  Span start+end:   ',(2⍕lib span_us),'µs'
+⎕←'  Metric counter:   ',(2⍕lib met_us),'µs'
 
 pp_otel_shutdown 0
 ⎕←''
