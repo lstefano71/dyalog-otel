@@ -26,11 +26,17 @@ public static class SpanExports
         string spanName = name.HasValue ? name.ReadString() : "unnamed";
         string tplName = templateName.HasValue ? templateName.ReadString() : "";
 
-        // Start the span (allocates handle, generates trace/span IDs)
-        int handle = pipe.StartSpan(spanName, parentHandle, null);
+        // Read start-time template and attributes
+        Templates.TemplateSnapshot? snapshot = null;
+        if (!string.IsNullOrEmpty(tplName))
+            snapshot = pipe.Templates.TryGet(tplName);
 
-        // Stash template + attrs for later (when span ends)
-        // For now, template lookup happens at span_end
+        OTelAttribute[]? attributes = null;
+        if (attrs.HasValue && attrs.IsNested())
+            attributes = ExportHelpers.ReadAttributes(attrs);
+
+        // Start the span (allocates handle, generates trace/span IDs)
+        int handle = pipe.StartSpan(spanName, parentHandle, null, attributes, snapshot);
 
         rslt.SetScalarInt(handle);
     }

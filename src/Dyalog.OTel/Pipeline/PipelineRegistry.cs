@@ -11,9 +11,10 @@ namespace Dyalog.OTel.Pipeline;
 /// </summary>
 public static class PipelineRegistry
 {
-    private static Pipeline? _singleton;
+    private static volatile Pipeline? _singleton;
     private static readonly ConcurrentDictionary<int, Pipeline> _pipelines = new();
     private static int _nextHandle = 1;
+    private static readonly object _initLock = new();
 
     private static volatile PipelineState _singletonState = PipelineState.Unconfigured;
 
@@ -25,13 +26,19 @@ public static class PipelineRegistry
         if (_singleton != null && _singletonState == PipelineState.Running)
             return _singleton;
 
-        if (_singletonState == PipelineState.Unconfigured)
+        lock (_initLock)
         {
-            // Lazy init: load config, create pipeline, start
-            var config = ConfigLoader.Load();
-            _singleton = BuildPipeline(config);
-            _singletonState = PipelineState.Running;
-            _singleton.Start();
+            if (_singleton != null && _singletonState == PipelineState.Running)
+                return _singleton;
+
+            if (_singletonState == PipelineState.Unconfigured)
+            {
+                // Lazy init: load config, create pipeline, start
+                var config = ConfigLoader.Load();
+                _singleton = BuildPipeline(config);
+                _singleton.Start();
+                _singletonState = PipelineState.Running;
+            }
         }
 
         return _singleton!;
@@ -112,6 +119,13 @@ public static class PipelineRegistry
         // Set resource attributes
         var autoDetected = ResourceDetector.Detect();
         pipeline.Resource = ResourceDetector.Merge(autoDetected, config.Resource);
+
+        // Inject resource attributes into OTLP destinations
+        foreach (var dest in destinations)
+        {
+            if (dest is OtlpJsonDestination otlpDest)
+                otlpDest.SetResource(pipeline.Resource);
+        }
 
         return pipeline;
     }

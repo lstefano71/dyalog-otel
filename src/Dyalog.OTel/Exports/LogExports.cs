@@ -53,7 +53,7 @@ public static class LogExports
             SeverityNumber = severity,
             SeverityText = SeverityToText(severity),
             Body = parsed.HasPlaceholders && attributes != null
-                ? parsed.Render(attributes.Select(a => a.Value).ToArray())
+                ? parsed.Render(attributes)
                 : body,
             Template = snapshot,
             Attributes = attributes
@@ -106,7 +106,7 @@ public static class LogExports
             SeverityNumber = severity,
             SeverityText = SeverityToText(severity),
             Body = parsed.HasPlaceholders && attributes != null
-                ? parsed.Render(attributes.Select(a => a.Value).ToArray())
+                ? parsed.Render(attributes)
                 : body,
             TraceId = traceId,
             SpanId = spanId,

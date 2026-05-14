@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Threading.Channels;
 using Dyalog.OTel.Channels;
 using Dyalog.OTel.Config;
@@ -33,10 +34,9 @@ public sealed class Pipeline : IDisposable
     public TemplateRegistry Templates { get; } = new();
     public Dictionary<string, string> Resource { get; set; } = new();
 
-    // Span tracking for trace/span ID resolution on hot path
+    // Interpreter-thread-only: DWA guarantees all exports are called from a single thread
     private readonly Dictionary<int, ActiveSpan> _activeSpans = new();
     private int _nextSpanHandle = 1;
-    private readonly object _spanLock = new();
 
     public Pipeline(List<IDestination> destinations, BatchConfig batchConfig, int channelCapacity = 8192)
     {
@@ -63,7 +63,7 @@ public sealed class Pipeline : IDisposable
         { IsBackground = true, Name = "otel-span-consumer" };
 
         _metricConsumer = new Thread(() => ConsumeLoop(_metricChannel.Reader, _batchConfig.MetricSize, _batchConfig.MetricIntervalMs, _metricFlushed,
-            (batch) => { foreach (var d in _destinations) d.WriteMetrics(batch); Metrics.MetricExported(batch.Length); }))
+            (batch) => { WriteMetricBatch(batch); }))
         { IsBackground = true, Name = "otel-metric-consumer" };
     }
 
@@ -103,49 +103,51 @@ public sealed class Pipeline : IDisposable
 
     // ── Span management (called from interpreter thread) ──
 
-    public int StartSpan(string name, int parentHandle, byte[]? traceId)
+    public int StartSpan(string name, int parentHandle, byte[]? traceId, OTelAttribute[]? startAttrs = null, Templates.TemplateSnapshot? startTemplate = null)
     {
-        lock (_spanLock)
+        int handle = _nextSpanHandle++;
+        if (handle <= 0) // wrapped past int.MaxValue or hit 0
         {
-            int handle = _nextSpanHandle++;
-            byte[] spanId = GenerateId(8);
-            byte[] resolvedTraceId = traceId ?? (parentHandle != 0 && _activeSpans.TryGetValue(parentHandle, out var parent)
-                ? parent.TraceId
-                : GenerateId(16));
-            byte[]? parentSpanId = parentHandle != 0 && _activeSpans.TryGetValue(parentHandle, out var p)
-                ? p.SpanId
-                : null;
-
-            _activeSpans[handle] = new ActiveSpan
-            {
-                TraceId = resolvedTraceId,
-                SpanId = spanId,
-                ParentSpanId = parentSpanId,
-                Name = name,
-                StartTimeUnixNano = GetTimestampNano()
-            };
-            return handle;
+            _nextSpanHandle = 2;
+            handle = 1;
         }
+        byte[] spanId = GenerateId(8);
+        byte[] resolvedTraceId = traceId ?? (parentHandle != 0 && _activeSpans.TryGetValue(parentHandle, out var parent)
+            ? parent.TraceId
+            : GenerateId(16));
+        byte[]? parentSpanId = parentHandle != 0 && _activeSpans.TryGetValue(parentHandle, out var p)
+            ? p.SpanId
+            : null;
+
+        _activeSpans[handle] = new ActiveSpan
+        {
+            TraceId = resolvedTraceId,
+            SpanId = spanId,
+            ParentSpanId = parentSpanId,
+            Name = name,
+            StartTimeUnixNano = GetTimestampNano(),
+            StartAttributes = startAttrs,
+            StartTemplate = startTemplate
+        };
+        return handle;
     }
 
+    // Interpreter-thread-only: no lock needed (single-thread DWA guarantee)
     public (byte[] TraceId, byte[] SpanId)? GetSpanContext(int spanHandle)
     {
-        lock (_spanLock)
-        {
-            if (_activeSpans.TryGetValue(spanHandle, out var span))
-                return (span.TraceId, span.SpanId);
-            return null;
-        }
+        if (_activeSpans.TryGetValue(spanHandle, out var span))
+            return (span.TraceId, span.SpanId);
+        return null;
     }
 
     public bool EndSpan(int spanHandle, OTelAttribute[]? attrs, Templates.TemplateSnapshot? template)
     {
-        ActiveSpan span;
-        lock (_spanLock)
-        {
-            if (!_activeSpans.Remove(spanHandle, out span!))
-                return false;
-        }
+        if (!_activeSpans.Remove(spanHandle, out var span))
+            return false;
+
+        // Merge start-time and end-time attributes (end overrides start for same keys)
+        OTelAttribute[]? mergedAttrs = MergeAttributes(span.StartAttributes, attrs);
+        Templates.TemplateSnapshot? mergedTemplate = template ?? span.StartTemplate;
 
         var record = new SpanRecord
         {
@@ -155,8 +157,8 @@ public sealed class Pipeline : IDisposable
             Name = span.Name,
             StartTimeUnixNano = span.StartTimeUnixNano,
             EndTimeUnixNano = GetTimestampNano(),
-            Template = template,
-            Attributes = attrs
+            Template = mergedTemplate,
+            Attributes = mergedAttrs
         };
 
         if (_spanChannel.Writer.TryWrite(record))
@@ -168,30 +170,43 @@ public sealed class Pipeline : IDisposable
         return false;
     }
 
-    private volatile int _flushRequested; // 0 = no, 1 = yes
+    private volatile TaskCompletionSource<bool>? _flushTcs;
 
     // ── Flush / Shutdown ──
 
     public void Flush()
     {
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
         _logFlushed.Reset();
         _spanFlushed.Reset();
         _metricFlushed.Reset();
 
-        // Signal consumers to drain and report
-        Volatile.Write(ref _flushRequested, 1);
+        // Publish the TCS so consumers see a flush request
+        _flushTcs = tcs;
 
-        // Wake consumers that are blocked in WaitToReadAsync
-        var old = Interlocked.Exchange(ref _wakeCts, new CancellationTokenSource());
-        old.Cancel();
-        old.Dispose();
+        // Keep waking consumers until all have acknowledged the flush.
+        // This handles the race where a consumer grabs a new wake token
+        // between our exchange-and-cancel.
+        var deadline = TimeSpan.FromSeconds(30);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.Elapsed < deadline)
+        {
+            var old = Interlocked.Exchange(ref _wakeCts, new CancellationTokenSource());
+            old.Cancel();
+            old.Dispose();
 
-        _logFlushed.Wait(TimeSpan.FromSeconds(30));
-        _spanFlushed.Wait(TimeSpan.FromSeconds(30));
-        _metricFlushed.Wait(TimeSpan.FromSeconds(30));
+            bool allSet = _logFlushed.Wait(TimeSpan.FromMilliseconds(100))
+                       && _spanFlushed.Wait(TimeSpan.FromMilliseconds(100))
+                       && _metricFlushed.Wait(TimeSpan.FromMilliseconds(100));
+            if (allSet) break;
+        }
 
-        // Clear the flag so consumers resume normal operation
-        Volatile.Write(ref _flushRequested, 0);
+        // Clear the TCS so consumers resume normal operation
+        _flushTcs = null;
+
+        // Flush aggregated histograms
+        FlushHistograms();
 
         foreach (var d in _destinations)
             d.Flush();
@@ -239,13 +254,21 @@ public sealed class Pipeline : IDisposable
             {
                 batch.Clear();
 
+                // Check for pending flush before entering a potentially blocking wait
+                if (_flushTcs != null)
+                {
+                    DrainAndSignalFlush(reader, batch, writeBatch, flushedEvent, token);
+                    continue;
+                }
+
                 // Wait for at least one item or timeout
                 try
                 {
-                    // Use wake token so Flush() can interrupt this wait
+                    // Pass wake token to WaitToReadAsync (flush interrupts it),
+                    // and shutdown token to Wait() — avoids per-iteration linked CTS allocation
                     var wake = _wakeCts.Token;
-                    using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, wake);
-                    if (reader.WaitToReadAsync(linked.Token).AsTask().Wait(intervalMs, linked.Token))
+                    var waitTask = reader.WaitToReadAsync(wake).AsTask();
+                    if (waitTask.Wait(intervalMs, token))
                     {
                         while (batch.Count < maxBatchSize && reader.TryRead(out var item))
                             batch.Add(item);
@@ -268,21 +291,10 @@ public sealed class Pipeline : IDisposable
                     }
                 }
 
-                // Check flush flag: drain remaining and signal
-                if (Volatile.Read(ref _flushRequested) == 1)
+                // Check flush TCS after batch processing
+                if (_flushTcs != null)
                 {
-                    batch.Clear();
-                    while (reader.TryRead(out var extra))
-                        batch.Add(extra);
-                    if (batch.Count > 0)
-                    {
-                        try { writeBatch(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(batch)); }
-                        catch { Metrics.ExportError(); }
-                    }
-                    flushedEvent.Set();
-                    // Spin-wait until flush is acknowledged (reset by Flush caller)
-                    while (Volatile.Read(ref _flushRequested) == 1 && !token.IsCancellationRequested)
-                        Thread.Sleep(1);
+                    DrainAndSignalFlush(reader, batch, writeBatch, flushedEvent, token);
                 }
             }
 
@@ -311,6 +323,25 @@ public sealed class Pipeline : IDisposable
 
     // ── Helpers ──
 
+    private void DrainAndSignalFlush<T>(ChannelReader<T> reader, List<T> batch,
+        Action<ReadOnlySpan<T>> writeBatch, ManualResetEventSlim flushedEvent, CancellationToken token)
+    {
+        var myTcs = _flushTcs; // capture the specific TCS we're handling
+        batch.Clear();
+        while (reader.TryRead(out var extra))
+            batch.Add(extra);
+        if (batch.Count > 0)
+        {
+            try { writeBatch(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(batch)); }
+            catch { Metrics.ExportError(); }
+        }
+        flushedEvent.Set();
+        // Wait for THIS specific flush to complete — break if TCS reference changes
+        // (covers the case where Flush() clears it to null, or a new Flush() replaces it)
+        while (ReferenceEquals(_flushTcs, myTcs) && !token.IsCancellationRequested)
+            Thread.Sleep(1);
+    }
+
     public static long GetTimestampNano()
     {
         // DateTime.UtcNow in Unix nanoseconds
@@ -320,8 +351,82 @@ public sealed class Pipeline : IDisposable
     private static byte[] GenerateId(int length)
     {
         var id = new byte[length];
-        Random.Shared.NextBytes(id);
+        RandomNumberGenerator.Fill(id);
         return id;
+    }
+
+    private static OTelAttribute[]? MergeAttributes(OTelAttribute[]? startAttrs, OTelAttribute[]? endAttrs)
+    {
+        if (startAttrs == null) return endAttrs;
+        if (endAttrs == null) return startAttrs;
+
+        // End attrs override start attrs for same keys
+        var merged = new Dictionary<string, object>();
+        foreach (var a in startAttrs)
+            merged[a.Key] = a.Value;
+        foreach (var a in endAttrs)
+            merged[a.Key] = a.Value;
+
+        return merged.Select(kv => new OTelAttribute(kv.Key, kv.Value)).ToArray();
+    }
+
+    private readonly HistogramAggregator _histogramAggregator = new();
+
+    private void WriteMetricBatch(ReadOnlySpan<MetricPoint> batch)
+    {
+        // Separate histogram observations from other metrics
+        var nonHistogram = new List<MetricPoint>();
+        foreach (var point in batch)
+        {
+            if (point.Type == Channels.MetricType.Histogram)
+                _histogramAggregator.Record(point.Name, point.Value);
+            else
+                nonHistogram.Add(point);
+        }
+
+        // Write non-histogram metrics directly
+        if (nonHistogram.Count > 0)
+        {
+            foreach (var d in _destinations)
+                d.WriteMetrics(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(nonHistogram));
+        }
+
+        Metrics.MetricExported(batch.Length);
+    }
+
+    private void FlushHistograms()
+    {
+        var snapshots = _histogramAggregator.SnapshotAndReset();
+        if (snapshots.Count == 0) return;
+
+        var points = new List<MetricPoint>();
+        foreach (var (name, snap) in snapshots)
+        {
+            if (snap.Count == 0) continue;
+            points.Add(new MetricPoint
+            {
+                TimestampUnixNano = GetTimestampNano(),
+                Name = name,
+                Value = snap.Sum,
+                Type = Channels.MetricType.Histogram,
+                Attributes = new[]
+                {
+                    new OTelAttribute("histogram.count", snap.Count),
+                    new OTelAttribute("histogram.sum", snap.Sum),
+                    new OTelAttribute("histogram.min", snap.Min),
+                    new OTelAttribute("histogram.max", snap.Max),
+                    new OTelAttribute("histogram.p50", snap.P50),
+                    new OTelAttribute("histogram.p90", snap.P90),
+                    new OTelAttribute("histogram.p99", snap.P99),
+                }
+            });
+        }
+
+        if (points.Count > 0)
+        {
+            foreach (var d in _destinations)
+                d.WriteMetrics(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(points));
+        }
     }
 
     private sealed class ActiveSpan
@@ -331,5 +436,7 @@ public sealed class Pipeline : IDisposable
         public byte[]? ParentSpanId { get; init; }
         public required string Name { get; init; }
         public long StartTimeUnixNano { get; init; }
+        public OTelAttribute[]? StartAttributes { get; init; }
+        public Templates.TemplateSnapshot? StartTemplate { get; init; }
     }
 }

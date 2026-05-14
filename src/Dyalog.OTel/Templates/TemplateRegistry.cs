@@ -43,13 +43,25 @@ public sealed class TemplateRegistry
     /// </summary>
     public void Delete(string name)
     {
-        _templates.TryRemove(name, out _);
+        // Collect all names to delete (iterative breadth-first)
+        var toDelete = new Queue<string>();
+        toDelete.Enqueue(name);
+        var deleted = new HashSet<string>();
 
-        // Cascade: find all templates that have this as parent
-        foreach (var kvp in _templates)
+        while (toDelete.Count > 0)
         {
-            if (kvp.Value.ParentName == name)
-                Delete(kvp.Key);
+            var current = toDelete.Dequeue();
+            if (!deleted.Add(current))
+                continue;
+
+            _templates.TryRemove(current, out _);
+
+            // Find children of the just-deleted template
+            foreach (var kvp in _templates)
+            {
+                if (kvp.Value.ParentName == current)
+                    toDelete.Enqueue(kvp.Key);
+            }
         }
     }
 

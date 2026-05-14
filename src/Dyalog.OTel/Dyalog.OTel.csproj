@@ -17,6 +17,9 @@
                       OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Dyalog.OTel.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="HdrHistogram" Version="2.*" />
     <PackageReference Include="LightProto" Version="*" />
   </ItemGroup>

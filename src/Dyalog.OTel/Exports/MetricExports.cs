@@ -23,7 +23,11 @@ public static class MetricExports
 
         long timestamp = Pipeline.Pipeline.GetTimestampNano();
         string name = metricName.HasValue ? metricName.ReadString() : "unnamed";
-        double val = value.HasValue ? value.ReadAsDoubles()[0] : 0.0;
+        // ReadAsDoubles() handles APL type conversion (int→double etc.)
+        // Bound() > 0 guard avoids IndexOutOfRange on empty arrays
+        double val = 0.0;
+        if (value.HasValue && value.Bound() > 0)
+            val = value.ReadAsDoubles()[0];
         string tplName = templateName.HasValue ? templateName.ReadString() : "";
 
         TemplateSnapshot? snapshot = null;

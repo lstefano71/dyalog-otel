@@ -97,7 +97,34 @@ public sealed class MessageTemplate
         {
             sb.Append(Segments[i]);
             if (i < PlaceholderNames.Length && i < values.Length)
-                sb.Append(values[i]?.ToString() ?? "");
+            {
+                string text = values[i] is IFormattable fmt
+                    ? fmt.ToString(null, System.Globalization.CultureInfo.InvariantCulture)
+                    : values[i]?.ToString() ?? "";
+                sb.Append(text);
+            }
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Render the template using attribute values directly, avoiding intermediate array allocation.
+    /// </summary>
+    public string Render(Dyalog.OTel.Channels.OTelAttribute[] attributes)
+    {
+        if (!HasPlaceholders) return Original;
+
+        var sb = new System.Text.StringBuilder();
+        for (int i = 0; i < Segments.Length; i++)
+        {
+            sb.Append(Segments[i]);
+            if (i < PlaceholderNames.Length && i < attributes.Length)
+            {
+                string text = attributes[i].Value is IFormattable fmt
+                    ? fmt.ToString(null, System.Globalization.CultureInfo.InvariantCulture)
+                    : attributes[i].Value?.ToString() ?? "";
+                sb.Append(text);
+            }
         }
         return sb.ToString();
     }

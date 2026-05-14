@@ -94,8 +94,7 @@ public static class LifecycleExports
     [DwaExport("pp_otel_add_dest")]
     public static void AddDestination(int pipeline, Localp type, Localp paramsArg)
     {
-        // TODO: Implement builder-phase destination addition
-        // This requires tracking whether pipeline is in builder phase
+        Console.Error.WriteLine("[dyalog-otel] WARNING: pp_otel_add_dest is not yet implemented. Configure destinations via INI file.");
     }
 
     /// <summary>
@@ -105,6 +104,6 @@ public static class LifecycleExports
     [DwaExport("pp_otel_resource")]
     public static void SetResource(int pipeline, Localp attrs)
     {
-        // TODO: Implement builder-phase resource setting
+        Console.Error.WriteLine("[dyalog-otel] WARNING: pp_otel_resource is not yet implemented. Configure resource via INI file or OTEL_RESOURCE_ATTRIBUTES env var.");
     }
 }
