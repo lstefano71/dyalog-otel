@@ -1,6 +1,6 @@
 #!/usr/local/bin/dyalogscript
 ⍝ Integration test for dyalog-otel
-⍝ Tests the DWA exports end-to-end: init → log → span → metric → stats → shutdown
+⍝ Tests DWA exports end-to-end: init → signals → flush → content verification → shutdown
 ⍝
 ⍝ Usage:  .\run_apl.ps1 test_otel.apls
 
@@ -11,6 +11,9 @@ dll←'##DLLPATH##'
 pass←0 ⋄ fail←0
 check←{(name exp got)←⍵ ⋄ exp≡got:⊢(pass+←1)⊢⎕←'  ✓ ',name ⋄ ⊢(fail+←1)⊢⎕←'  ✗ ',name,' — exp ',(⍕exp),' got ',⍕got}
 
+⍝ Clean up any leftover test output (1= wildcard/no-error-if-missing)
+_←1 ⎕NDELETE 'test-output.jsonl'
+
 ⎕←'=== dyalog-otel Integration Tests ==='
 
 ⍝ --- Version ---
@@ -20,7 +23,7 @@ ver←pp_otel_version 0
 _←check 'version is string' 1 (0<≢ver)
 _←check 'version content' 1 (∨/'0.1.0'⍷ver)
 
-⍝ --- Init (lazy singleton) ---
+⍝ --- Init (uses test_otel.ini via DYALOG_OTEL_CONFIG env var) ---
 ⎕←'Init:'
 ⎕NA dll,'|pp_otel_init >PP'
 h←pp_otel_init 0
@@ -112,14 +115,99 @@ _←check 'tpl delete (no error)' 1 1
 pp_otel_flush 0
 _←check 'flush (no error)' 1 1
 
-⍝ Check stats after flush — exported counts should have increased
+⍝ Check stats after flush
 raw2←pp_otel_stats 0 0
 stats2←3 3⍴raw2
 ⎕←'  Stats after flush:'
 ⎕←stats2
 _←check 'logs exported after flush' 1 (0<stats2[0;1])
 
+⍝ ═══════════════════════════════════════════════════
+⍝ CONTENT VERIFICATION — read and check JSONL output
+⍝ ═══════════════════════════════════════════════════
+⎕←''
+⎕←'Content verification (JSONL file):'
+
+:If ⎕NEXISTS 'test-output.jsonl'
+    _←check 'jsonl file exists' 1 1
+
+    ⍝ Read all lines
+    rawlines←⊃⎕NGET 'test-output.jsonl' 1
+    lines←(0<≢¨rawlines)/rawlines
+    _←check 'jsonl has lines' 1 (0<≢lines)
+
+    ⍝ Parse each line as JSON → vector of namespaces
+    records←⎕JSON¨ lines
+    ⎕←'  Total records: ',⍕≢records
+
+    ⍝ Classify by type-discriminating fields using error-trapping field access
+    isLog←{0::0 ⋄ _←⍵.severityNumber ⋄ 1}¨records
+    isSpan←{0::0 ⋄ _←⍵.startTimeUnixNano ⋄ _←⍵.endTimeUnixNano ⋄ 1}¨records
+    isMetric←(~isLog)∧(~isSpan)
+
+    logs←isLog/records
+    spans←isSpan/records
+    metrics←isMetric/records
+    ⎕←'  Logs: ',(⍕≢logs),'  Spans: ',(⍕≢spans),'  Metrics: ',⍕≢metrics
+
+    ⍝ ── Log content ──
+    _←check 'file: 4 log records' 4 (≢logs)
+
+    :If 4≤≢logs
+        _←check 'log[0] body' 'Hello from APL' (0⊃logs).body
+        _←check 'log[0] severity' 'INFO' (0⊃logs).severityText
+        _←check 'log[0] timestamp > 0' 1 (0<(0⊃logs).timestampUnixNano)
+
+        ⍝ Template-rendered body should contain the filler values
+        _←check 'log[1] body has "42"' 1 (∨/'42'⍷(1⊃logs).body)
+        _←check 'log[1] body has "99"' 1 (∨/'99'⍷(1⊃logs).body)
+
+        ⍝ Span-correlated log should have trace context
+        _←check 'log[2] body' 'Event inside span' (2⊃logs).body
+        _←check 'log[2] has traceId' 1 (0<≢(2⊃logs).traceId)
+        _←check 'log[2] has spanId' 1 (0<≢(2⊃logs).spanId)
+
+        _←check 'log[3] body' 'Using template' (3⊃logs).body
+    :EndIf
+
+    ⍝ ── Span content ──
+    _←check 'file: 4 span records' 4 (≢spans)
+
+    :If 4≤≢spans
+        _←check 'span[0] name' 'test-operation' (0⊃spans).name
+        _←check 'span[0] has traceId' 1 (0<≢(0⊃spans).traceId)
+        _←check 'span[0] has spanId' 1 (0<≢(0⊃spans).spanId)
+        _←check 'span[0] duration > 0' 1 ((0⊃spans).endTimeUnixNano>(0⊃spans).startTimeUnixNano)
+
+        ⍝ Child span should have parent
+        _←check 'span[2] name' 'child' (2⊃spans).name
+        _←check 'span[2] has parentSpanId' 1 (0<≢(2⊃spans).parentSpanId)
+
+        _←check 'span[3] name' 'root' (3⊃spans).name
+    :EndIf
+
+    ⍝ ── Metric content ──
+    _←check 'file: 3 metric records' 3 (≢metrics)
+
+    :If 3≤≢metrics
+        _←check 'metric[0] name' 'requests.count' (0⊃metrics).name
+        _←check 'metric[0] value' 1 (0⊃metrics).value
+        _←check 'metric[0] type (counter=0)' 0 (0⊃metrics).type
+
+        _←check 'metric[1] name' 'cpu.usage' (1⊃metrics).name
+        _←check 'metric[1] value' 72.5 (1⊃metrics).value
+        _←check 'metric[1] type (gauge=1)' 1 (1⊃metrics).type
+
+        _←check 'metric[2] name' 'request.duration' (2⊃metrics).name
+        _←check 'metric[2] value' 150.3 (2⊃metrics).value
+        _←check 'metric[2] type (histogram=2)' 2 (2⊃metrics).type
+    :EndIf
+:Else
+    _←check 'jsonl file exists' 1 0
+:EndIf
+
 ⍝ --- Shutdown ---
+⎕←''
 ⎕←'Shutdown:'
 ⎕NA dll,'|pp_otel_shutdown I4'
 pp_otel_shutdown 0

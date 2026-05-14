@@ -12,6 +12,7 @@ public sealed class JsonlFileDestination : IDestination
     private readonly string _basePath;
     private readonly RotationPeriod _rotation;
     private readonly HashSet<string> _signals;
+    private readonly object _writeLock = new();
     private StreamWriter? _writer;
     private string? _currentFilePath;
     private string _currentPeriodKey = "";
@@ -33,37 +34,50 @@ public sealed class JsonlFileDestination : IDestination
     public void WriteLogs(ReadOnlySpan<LogRecord> batch)
     {
         if (!_signals.Contains("log")) return;
-        EnsureWriter();
-        foreach (var record in batch)
-            _writer!.WriteLine(JsonSerializer.Serialize(record, JsonContext.Default.LogRecord));
+        lock (_writeLock)
+        {
+            EnsureWriter();
+            foreach (var record in batch)
+                _writer!.WriteLine(JsonSerializer.Serialize(record, JsonContext.Default.LogRecord));
+        }
     }
 
     public void WriteSpans(ReadOnlySpan<SpanRecord> batch)
     {
         if (!_signals.Contains("span")) return;
-        EnsureWriter();
-        foreach (var record in batch)
-            _writer!.WriteLine(JsonSerializer.Serialize(record, JsonContext.Default.SpanRecord));
+        lock (_writeLock)
+        {
+            EnsureWriter();
+            foreach (var record in batch)
+                _writer!.WriteLine(JsonSerializer.Serialize(record, JsonContext.Default.SpanRecord));
+        }
     }
 
     public void WriteMetrics(ReadOnlySpan<MetricPoint> batch)
     {
         if (!_signals.Contains("metric")) return;
-        EnsureWriter();
-        foreach (var record in batch)
-            _writer!.WriteLine(JsonSerializer.Serialize(record, JsonContext.Default.MetricPoint));
+        lock (_writeLock)
+        {
+            EnsureWriter();
+            foreach (var record in batch)
+                _writer!.WriteLine(JsonSerializer.Serialize(record, JsonContext.Default.MetricPoint));
+        }
     }
 
     public void Flush()
     {
-        _writer?.Flush();
+        lock (_writeLock)
+            _writer?.Flush();
     }
 
     public void Shutdown()
     {
-        _writer?.Flush();
-        _writer?.Dispose();
-        _writer = null;
+        lock (_writeLock)
+        {
+            _writer?.Flush();
+            _writer?.Dispose();
+            _writer = null;
+        }
     }
 
     public void Dispose() => Shutdown();

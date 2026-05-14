@@ -29,6 +29,13 @@ if ($needsSubst) {
     $runPath = $tmp
 }
 
+# --- auto-detect companion .ini for OTEL config ---
+$iniPath = [System.IO.Path]::ChangeExtension($ScriptPath, '.ini')
+if (Test-Path $iniPath) {
+    $env:DYALOG_OTEL_CONFIG = (Resolve-Path $iniPath).Path
+    Write-Host "Using OTEL config: $($env:DYALOG_OTEL_CONFIG)"
+}
+
 # --- launch dyascript.exe ---
 $env:DYALOG_NOPOPUPS = "1"
 $env:ErrorOnExternalException = "1"
