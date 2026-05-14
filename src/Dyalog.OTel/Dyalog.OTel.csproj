@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishAot>true</PublishAot>
+    <IsAotCompatible>true</IsAotCompatible>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Dyalog.OTel</RootNamespace>
+    <Description>OpenTelemetry-compatible telemetry library for Dyalog APL via DWA</Description>
+    <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\bridge-dwa\ModernDotnet\src\Dyalog.DWA.Managed\Dyalog.DWA.Managed.csproj" />
+    <ProjectReference Include="..\..\..\bridge-dwa\ModernDotnet\src\Dyalog.DWA.Generators\Dyalog.DWA.Generators.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="HdrHistogram" Version="2.*" />
+    <PackageReference Include="LightProto" Version="*" />
+  </ItemGroup>
+  <!-- Import the DWA shim compilation target -->
+  <Import Project="..\..\..\bridge-dwa\ModernDotnet\src\Dyalog.DWA.Generators\build\Dyalog.DWA.Generators.targets" />
+</Project>

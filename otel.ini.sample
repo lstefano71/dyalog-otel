@@ -1,0 +1,31 @@
+; dyalog-otel configuration
+; Place this file beside the DLL, in CWD, or set DYALOG_OTEL_CONFIG env var.
+
+[resource]
+service.name = my-apl-app
+deployment.environment = development
+
+; File destination: JSONL with monthly rotation
+[destination.file]
+path = logs/otel.jsonl
+rotate = monthly
+signals = log,span,metric
+
+; HTTP destination (uncomment to enable):
+; [destination.http]
+; url = http://localhost:8080/ingest
+; headers = Authorization=Bearer mytoken
+; signals = log,span
+
+; OTLP destination (uncomment to enable):
+; [destination.otlp]
+; endpoint = http://localhost:4318
+; protocol = http/protobuf
+
+[batch]
+log.size = 512
+log.interval = 5000
+span.size = 256
+span.interval = 2000
+metric.size = 256
+metric.interval = 60000
