@@ -140,9 +140,9 @@ _←check 'logs exported after flush' 1 (0<stats2[0;1])
     records←⎕JSON¨ lines
     ⎕←'  Total records: ',⍕≢records
 
-    ⍝ Classify by type-discriminating fields using error-trapping field access
-    isLog←{0::0 ⋄ _←⍵.severityNumber ⋄ 1}¨records
-    isSpan←{0::0 ⋄ _←⍵.startTimeUnixNano ⋄ _←⍵.endTimeUnixNano ⋄ 1}¨records
+    ⍝ Classify by type-discriminating fields (⊃ needed: ⎕NC always returns a vector)
+    isLog←{0≠⊃⍵.⎕NC'severityNumber'}¨records
+    isSpan←{(0≠⊃⍵.⎕NC'startTimeUnixNano')∧0≠⊃⍵.⎕NC'endTimeUnixNano'}¨records
     isMetric←(~isLog)∧(~isSpan)
 
     logs←isLog/records
