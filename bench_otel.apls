@@ -1,0 +1,128 @@
+#!/usr/local/bin/dyalogscript
+⍝ Benchmark: measure hot-path overhead of dyalog-otel
+⍝
+⍝ Usage:  .\run_apl.ps1 bench_otel.apls 120
+⍝
+⍝ Reports per-call cost in microseconds for each signal type,
+⍝ compared against a baseline (bare loop + variable assignment).
+⍝
+⍝ Uses ⎕DT with code 15 (Go UnixMicro) for µs-precision timing.
+⍝ 'Z' is the Zulu military timezone char meaning "now in UTC".
+
+⎕IO←0 ⋄ ⎕ML←1
+
+dll←'##DLLPATH##'
+N←100000  ⍝ iterations per benchmark
+
+⍝ --- helpers ---
+⍝ now: current time in microseconds (µs ticks since epoch)
+now←{15 ⎕DT 'Z'}
+
+⍝ fmt: N iter, elapsed µs → formatted string with µs/call and calls/sec
+fmt←{
+    (n us_total)←⍵
+    us←us_total÷n
+    cps←⌊n×1000000÷us_total⌈1
+    (2⍕us),'µs/call   (',(⍕cps),' calls/sec)'
+}
+
+⎕←'═══════════════════════════════════════════'
+⎕←' dyalog-otel Hot-Path Benchmark'
+⎕←' Iterations per test: ',⍕N
+⎕←'═══════════════════════════════════════════'
+⎕←''
+
+⍝ --- Init ---
+⎕NA dll,'|pp_otel_init >PP'
+⎕NA dll,'|pp_otel_log I4 I4 <PP <PP <PP'
+⎕NA dll,'|pp_otel_log_span I4 I4 <PP I4 <PP <PP'
+⎕NA dll,'|pp_otel_span_start I4 <PP I4 <PP <PP >PP'
+⎕NA dll,'|pp_otel_span_end I4 I4 <PP <PP'
+⎕NA dll,'|pp_otel_metric I4 <PP <PP I4 <PP <PP'
+⎕NA dll,'|pp_otel_flush I4'
+⎕NA dll,'|pp_otel_shutdown I4'
+⎕NA dll,'|pp_otel_stats I4 >PP'
+
+_←pp_otel_init 0
+
+⍝ ── 1. Baseline: bare loop with assignment ──
+t0←now ⍬
+:For i :In ⍳N
+    _←i×2
+:EndFor
+t1←now ⍬
+base_us←t1-t0
+⎕←'Baseline (loop+assign):  ',fmt N base_us
+
+⍝ ── 2. Plain log (no template, no attrs) ──
+t0←now ⍬
+:For i :In ⍳N
+    pp_otel_log 0 9 'Benchmark message' '' ⍬
+:EndFor
+t1←now ⍬
+log_us←t1-t0
+⎕←'Log (plain):             ',fmt N log_us
+
+⍝ ── 3. Log with message template + fillers ──
+t0←now ⍬
+:For i :In ⍳N
+    pp_otel_log 0 9 'Order {OrderId} total {Amount}' '' (42 99.5)
+:EndFor
+t1←now ⍬
+tpl_us←t1-t0
+⎕←'Log (template+fillers):  ',fmt N tpl_us
+
+⍝ ── 4. Log with key-value attrs ──
+t0←now ⍬
+:For i :In ⍳N
+    pp_otel_log 0 9 'Event with attrs' '' ('user' 'alice' 'action' 'login')
+:EndFor
+t1←now ⍬
+attr_us←t1-t0
+⎕←'Log (key-value attrs):   ',fmt N attr_us
+
+⍝ ── 5. Span start + end ──
+t0←now ⍬
+:For i :In ⍳N
+    h←pp_otel_span_start 0 'bench-op' 0 '' ⍬ 0
+    pp_otel_span_end 0 h '' ⍬
+:EndFor
+t1←now ⍬
+span_us←t1-t0
+⎕←'Span (start+end):        ',fmt N span_us
+
+⍝ ── 6. Metric counter ──
+t0←now ⍬
+:For i :In ⍳N
+    pp_otel_metric 0 'bench.counter' (,1) 0 '' ⍬
+:EndFor
+t1←now ⍬
+met_us←t1-t0
+⎕←'Metric (counter):        ',fmt N met_us
+
+⍝ ── Flush + stats ──
+⎕←''
+pp_otel_flush 0
+raw←pp_otel_stats 0 0
+stats←3 3⍴raw
+⎕←'Stats (enq/exp/drop):'
+⎕←'  Logs:    ',⍕stats[0;]
+⎕←'  Spans:   ',⍕stats[1;]
+⎕←'  Metrics: ',⍕stats[2;]
+drops←+/stats[;2]
+⎕←'  Total drops: ',⍕drops
+
+⍝ ── Summary ──
+⎕←''
+⎕←'─── Overhead (net of baseline) ───'
+net←{(⍵-base_us)÷N}
+⎕←'  Log plain:       ',(2⍕net log_us),'µs'
+⎕←'  Log template:    ',(2⍕net tpl_us),'µs'
+⎕←'  Log attrs:       ',(2⍕net attr_us),'µs'
+⎕←'  Span start+end:  ',(2⍕net span_us),'µs'
+⎕←'  Metric counter:  ',(2⍕net met_us),'µs'
+
+pp_otel_shutdown 0
+⎕←''
+⎕←'Done.'
+⎕OFF 0
