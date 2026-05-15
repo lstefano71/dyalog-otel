@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Threading.Channels;
@@ -244,7 +245,7 @@ public sealed class Pipeline : IDisposable
         Interlocked.Increment(ref _flushEpoch);
 
         // Wait until consumers have processed everything up to the watermark
-        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var sw = Stopwatch.StartNew();
         while (sw.ElapsedMilliseconds < FlushTimeoutMs)
         {
             long lp = Interlocked.Read(ref _logProcessed);
@@ -292,16 +293,15 @@ public sealed class Pipeline : IDisposable
                 while (batch.Count < batchSize && reader.TryRead(out var item))
                 {
                     if (batch.Count == 0)
-                        batchStartedAt = Environment.TickCount64;
+                        batchStartedAt = Stopwatch.GetTimestamp();
                     batch.Add(item);
                 }
 
                 long currentFlushEpoch = Interlocked.Read(ref _flushEpoch);
-                long now = Environment.TickCount64;
                 bool flushRequested = currentFlushEpoch != seenFlushEpoch;
                 bool intervalElapsed = batch.Count > 0
                     && batchIntervalMs > 0
-                    && now - batchStartedAt >= batchIntervalMs;
+                    && Stopwatch.GetElapsedTime(batchStartedAt).TotalMilliseconds >= batchIntervalMs;
                 bool completed = reader.Completion.IsCompleted;
 
                 if (batch.Count >= batchSize || (batch.Count > 0 && (flushRequested || intervalElapsed || completed)))
@@ -381,7 +381,7 @@ public sealed class Pipeline : IDisposable
         int waitMs = ConsumerWakeIntervalMs;
         if (batchCount > 0 && batchIntervalMs > 0)
         {
-            long remaining = batchIntervalMs - (Environment.TickCount64 - batchStartedAt);
+            long remaining = batchIntervalMs - (long)Stopwatch.GetElapsedTime(batchStartedAt).TotalMilliseconds;
             if (remaining <= 0)
                 return 1;
             if (remaining < waitMs)
