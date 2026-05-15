@@ -199,8 +199,9 @@ public sealed class OtlpProtobufDestination : IDestination
             using var content = new ByteArrayContent(data);
             content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/x-protobuf");
             using var response = _client.Send(
-                new HttpRequestMessage(HttpMethod.Post, url) { Content = content },
-                HttpCompletionOption.ResponseHeadersRead);
+                new HttpRequestMessage(HttpMethod.Post, url) { Content = content });
+            // Drain response body so the connection returns to the pool
+            response.Content.ReadAsStream().CopyTo(Stream.Null);
         }
         catch { /* Background thread — errors tracked via InternalMetrics */ }
     }
