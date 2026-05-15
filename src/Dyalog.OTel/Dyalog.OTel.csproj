@@ -12,6 +12,22 @@
     <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Remove="Channels\Common.cs" />
+    <Compile Remove="Channels\LogRecord.cs" />
+    <Compile Remove="Channels\SpanRecord.cs" />
+    <Compile Remove="Channels\MetricPoint.cs" />
+    <Compile Remove="Templates\TemplateSnapshot.cs" />
+    <Compile Remove="Destinations\IDestination.cs" />
+    <Compile Remove="Destinations\JsonlFileDestination.cs" />
+    <Compile Remove="Destinations\JsonlHttpDestination.cs" />
+    <Compile Remove="Destinations\OtlpJsonDestination.cs" />
+    <Compile Remove="Destinations\OtlpProtobufDestination.cs" />
+    <Compile Remove="Serialization\JsonModels\OtlpModels.cs" />
+    <Compile Remove="Serialization\JsonModels\OtlpJsonContext.cs" />
+    <Compile Remove="Serialization\ProtoModels\OtlpProtoModels.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Dyalog.OTel.Abstractions\Dyalog.OTel.Abstractions.csproj" />
     <ProjectReference Include="..\..\..\bridge-dwa\ModernDotnet\src\Dyalog.DWA.Managed\Dyalog.DWA.Managed.csproj" />
     <ProjectReference Include="..\..\..\bridge-dwa\ModernDotnet\src\Dyalog.DWA.Generators\Dyalog.DWA.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
@@ -20,8 +36,25 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="HdrHistogram" Version="2.*" />
-    <PackageReference Include="LightProto" Version="*" />
   </ItemGroup>
+  <ItemGroup>
+    <DestinationCompanionProject Include="..\Dyalog.OTel.Destinations.Jsonl\Dyalog.OTel.Destinations.Jsonl.csproj" />
+    <DestinationCompanionProject Include="..\Dyalog.OTel.Destinations.Otlp\Dyalog.OTel.Destinations.Otlp.csproj" />
+  </ItemGroup>
+  <Target Name="PublishDestinationCompanions" AfterTargets="Publish">
+    <MSBuild Projects="@(DestinationCompanionProject)"
+             Targets="Publish"
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);PublishDir=$(PublishDir)" />
+    <ItemGroup>
+      <PublishedDestinationCompanion Include="..\Dyalog.OTel.Destinations.Jsonl\bin\$(Configuration)\net10.0\$(RuntimeIdentifier)\publish\Dyalog.OTel.Destinations.Jsonl.dll" />
+      <PublishedDestinationCompanion Include="..\Dyalog.OTel.Destinations.Jsonl\bin\$(Configuration)\net10.0\$(RuntimeIdentifier)\publish\Dyalog.OTel.Destinations.Jsonl.pdb" />
+      <PublishedDestinationCompanion Include="..\Dyalog.OTel.Destinations.Otlp\bin\$(Configuration)\net10.0\$(RuntimeIdentifier)\publish\Dyalog.OTel.Destinations.Otlp.dll" />
+      <PublishedDestinationCompanion Include="..\Dyalog.OTel.Destinations.Otlp\bin\$(Configuration)\net10.0\$(RuntimeIdentifier)\publish\Dyalog.OTel.Destinations.Otlp.pdb" />
+    </ItemGroup>
+    <Copy SourceFiles="@(PublishedDestinationCompanion)"
+          DestinationFolder="$(PublishDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
   <!-- Import the DWA shim compilation target -->
   <Import Project="..\..\..\bridge-dwa\ModernDotnet\src\Dyalog.DWA.Generators\build\Dyalog.DWA.Generators.targets" />
 </Project>

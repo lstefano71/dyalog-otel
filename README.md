@@ -9,7 +9,7 @@ Built as a NativeAOT C# DLL using the [DWA Kit](https://github.com/user/bridge-d
 - **Logs** — plain text or Serilog-style message templates (`'Order {OrderId} placed for {Amount}'`)
 - **Traces** — explicit span start/end with parent-child nesting, log↔span correlation
 - **Metrics** — counters, gauges, histograms
-- **Destinations** — JSONL file (with time-based rotation), human-readable text file, JSONL-over-HTTP, OTLP/Protobuf (default), OTLP/JSON, console fallback
+- **Destinations** — `text` and `console` in the core DLL, plus opt-in companion DLL families for JSONL (`file`, `http`) and OTLP (`otlp`)
 - **Config** — INI file with 4-layer precedence (defaults → file → env vars → builder calls)
 - **Attribute templates** — pre-built frozen snapshots for recurring key-value sets
 
@@ -25,17 +25,22 @@ Built as a NativeAOT C# DLL using the [DWA Kit](https://github.com/user/bridge-d
 dotnet publish src\Dyalog.OTel\Dyalog.OTel.csproj -c Release
 ```
 
-This produces two DLLs in `src\Dyalog.OTel\bin\Release\net10.0\win-x64\publish\`:
+This produces the publish layout in `src\Dyalog.OTel\bin\Release\net10.0\win-x64\publish\`:
 - `Dyalog.OTel.dll` — C shim (APL loads this via `⎕NA`)
 - `Dyalog.OTel_impl.dll` — NativeAOT implementation
+- `Dyalog.OTel.Destinations.Jsonl.dll` — native companion family for `destination.file` and `destination.http`
+- `Dyalog.OTel.Destinations.Otlp.dll` — native companion family for `destination.otlp`
+
+The config surface is unchanged: you still write `type=file|http|otlp|text|console`. The core DLL discovers companion DLLs by fixed name beside `Dyalog.OTel.dll`.
 
 ## Run tests
 
 ```powershell
 .\run_apl.ps1 test_otel.apls
+.\run_apl.ps1 test_text.apls
 ```
 
-The test suite (54 checks) exercises:
+`test_otel.apls` (59 checks) exercises:
 - Lifecycle: version, init, status, shutdown
 - Logs: plain text, message templates with fillers, span-correlated logs
 - Traces: span start/end, nested spans, parent-child relationships
@@ -44,7 +49,9 @@ The test suite (54 checks) exercises:
 - Flush: drain all channels, verify stats
 - **Content verification**: reads the JSONL output file after flush and checks every field (body, severity, timestamps, trace/span IDs, metric names/values/types, parent-child links)
 
-Uses `test_otel.ini` (auto-detected by `run_apl.ps1` as a companion config).
+`test_text.apls` adds a 17-check smoke test for the human-readable text destination.
+
+Uses `test_otel.ini` / `test_text.ini` (auto-detected by `run_apl.ps1` as companion configs).
 
 ## Run benchmark
 
@@ -93,9 +100,19 @@ Uses `bench_otlp.ini` (auto-detected).
 
 ## Configuration
 
-Copy `otel.ini.sample` beside the DLL, into your working directory, or set the `DYALOG_OTEL_CONFIG` environment variable. See the sample for all options.
+Copy `otel.ini.sample` beside `Dyalog.OTel.dll`, into your working directory, or set the `DYALOG_OTEL_CONFIG` environment variable. See the sample for all options.
 
 Standard `OTEL_*` environment variables are also supported (`OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`, `OTEL_EXPORTER_OTLP_ENDPOINT`, etc.).
+
+### Destination companion DLLs
+
+The destination split is packaging-only; config names stay the same:
+
+- `destination.text` and the `console` fallback stay in the core DLL
+- `destination.file` and `destination.http` require `Dyalog.OTel.Destinations.Jsonl.dll`
+- `destination.otlp` requires `Dyalog.OTel.Destinations.Otlp.dll`
+
+Configured companion destinations are not optional at runtime. If a pipeline is configured with `file`, `http`, or `otlp` and the corresponding companion DLL is missing or broken beside `Dyalog.OTel.dll`, `pp_otel_init` fails pipeline startup.
 
 ### `destination.text`
 

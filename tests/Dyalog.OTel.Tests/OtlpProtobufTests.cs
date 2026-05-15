@@ -121,56 +121,6 @@ public class OtlpProtobufTests
     }
 
     [Fact]
-    public void DestinationFactory_CreatesProtobufByDefault()
-    {
-        var config = new DestinationConfig
-        {
-            Type = "otlp",
-            Properties = new() { ["endpoint"] = "http://localhost:4318" }
-        };
-        var dest = DestinationFactory.Create(config);
-        Assert.NotNull(dest);
-        Assert.IsType<OtlpProtobufDestination>(dest);
-        dest!.Dispose();
-    }
-
-    [Fact]
-    public void DestinationFactory_CreatesJsonWhenProtocolJson()
-    {
-        var config = new DestinationConfig
-        {
-            Type = "otlp",
-            Properties = new()
-            {
-                ["endpoint"] = "http://localhost:4318",
-                ["protocol"] = "json"
-            }
-        };
-        var dest = DestinationFactory.Create(config);
-        Assert.NotNull(dest);
-        Assert.IsType<OtlpJsonDestination>(dest);
-        dest!.Dispose();
-    }
-
-    [Fact]
-    public void DestinationFactory_CreatesProtobufWhenProtocolProtobuf()
-    {
-        var config = new DestinationConfig
-        {
-            Type = "otlp",
-            Properties = new()
-            {
-                ["endpoint"] = "http://localhost:4318",
-                ["protocol"] = "protobuf"
-            }
-        };
-        var dest = DestinationFactory.Create(config);
-        Assert.NotNull(dest);
-        Assert.IsType<OtlpProtobufDestination>(dest);
-        dest!.Dispose();
-    }
-
-    [Fact]
     public void ProtobufDestination_AcceptsBatchWriteWithoutError()
     {
         var dest = new OtlpProtobufDestination("http://localhost:4318");

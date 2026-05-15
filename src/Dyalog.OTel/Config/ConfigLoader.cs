@@ -1,3 +1,5 @@
+using Dyalog.OTel.Diagnostics;
+
 namespace Dyalog.OTel.Config;
 
 /// <summary>
@@ -37,8 +39,8 @@ public static class ConfigLoader
         if (!string.IsNullOrEmpty(envPath) && File.Exists(envPath))
             return envPath;
 
-        // 2. Beside the DLL (AppContext.BaseDirectory works in NativeAOT)
-        string baseDir = AppContext.BaseDirectory;
+        // 2. Beside the loaded core DLL
+        string baseDir = ModulePathResolver.GetModuleDirectory();
         string besideBase = Path.Combine(baseDir, ConfigFileName);
         if (File.Exists(besideBase))
             return besideBase;

@@ -2,7 +2,7 @@ using Dyalog.OTel.Channels;
 
 namespace Dyalog.OTel.Destinations;
 
-public sealed class TextDestination : IDestination, IRawHistogramObservationDestination
+public sealed class TextDestination : IDestination, IResourceAwareDestination, IRawHistogramObservationDestination
 {
     private readonly TextDestinationOptions _options;
     private readonly TextLineRenderer _renderer;

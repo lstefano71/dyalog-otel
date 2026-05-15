@@ -32,6 +32,42 @@ _Avoid_: exporter (OTel-specific term — we may support non-OTel destinations),
 A destination that renders raw log records and selected synthesized summaries as human-readable text into a text stream.
 _Avoid_: file destination, console fallback
 
+**Event Log destination**:
+A Windows operator-facing destination that writes selected log records to the Application event log using a configured source.
+_Avoid_: debug viewer, console fallback
+
+**ETW provider**:
+An opt-in EventSource/TraceLogging surface exposed by the library for developer and performance diagnostics on Windows.
+_Avoid_: destination, operator log
+
+**ETW destination**:
+The user-signal path that mirrors selected logs and spans into the ETW provider.
+_Avoid_: whole ETW surface, internal diagnostics stream
+
+**Analytics handoff format**:
+A local structured format written for downstream analysis tools such as DuckDB, optimized for append-friendly export rather than built-in query UX.
+_Avoid_: query store, warehouse
+
+**Debug feed**:
+A bounded local output target intended for developer inspection during local runs, separate from operator-facing production outputs.
+_Avoid_: viewer, inspector, destination UI
+
+**Debug viewer**:
+A local tool or UI that reads from a debug feed and presents live telemetry to a developer.
+_Avoid_: destination, sink
+
+**Durable delivery mode**:
+A delivery mode for a remote destination that persists serialized outbound requests locally until the remote endpoint accepts them.
+_Avoid_: spool destination, offline mode
+
+**Local durable handoff**:
+The point at which in-memory telemetry has been durably written to the local spool, even if the remote endpoint has not yet accepted it.
+_Avoid_: delivered, remotely flushed
+
+**Remote acceptance**:
+The point at which a remote endpoint confirms receipt of a batch; the moment durable remote delivery counts as success.
+_Avoid_: enqueue success, attempted export
+
 **Span handle**:
 An opaque integer returned by `otel_span_start`, identifying an active span. Parenting is always explicit (pass parent handle at creation) — never inferred from an implicit stack. Must be closed with `otel_span_end`.
 _Avoid_: span context, trace handle
@@ -86,6 +122,14 @@ _Avoid_: banner, bootstrap log spam
 - A **destination** may route output into one or more **text streams**
 - A **text destination** writes to a **text stream**
 - A **text destination** may emit a **startup block** and **summary blocks**
+- An **Event Log destination** is a **destination** aimed at operator visibility on Windows
+- An **ETW provider** may emit both internal diagnostics and mirrored user telemetry
+- An **ETW destination** is one path into an **ETW provider**
+- An **analytics handoff format** is consumed by downstream analysis tools rather than queried by the library itself
+- A **debug viewer** reads from a **debug feed**
+- A **debug feed** is the local output target; a **debug viewer** is the developer-facing reader
+- A **durable delivery mode** belongs to a remote **destination**
+- **Local durable handoff** happens before **remote acceptance**
 - Multiple **emitters** may share a **text stream**
 
 ## Flagged ambiguities
@@ -96,3 +140,8 @@ _Avoid_: banner, bootstrap log spam
 - "log" can mean a raw log record or a human-readable periodic digest — resolved: use **log record** for raw emitted logs and **summary block** for synthesized periodic metric output.
 - A text filename can look like an emitter name but is only a routing artifact — resolved: use **text stream** for the per-process output target and **emitter** for the per-signal origin code.
 - "file destination" and human-readable text output are different concepts — resolved: use **file destination** for JSONL-style structured output and **text destination** for operator-facing text output.
+- "destination" was starting to mean both a local output target and the UI used to inspect it — resolved: use **debug feed** for the bounded local output target and **debug viewer** for the tool or UI that reads it.
+- "spool" can sound like a standalone output target — resolved: use **durable delivery mode** for the opt-in delivery layer applied to remote destinations.
+- "flush" can mean either local persistence or confirmed remote delivery — resolved: use **local durable handoff** for persistence to the local spool and **remote acceptance** for confirmed delivery by the remote endpoint.
+- "queryable local format" can mean either a built-in store or a downstream-friendly export — resolved: use **analytics handoff format** for the append-friendly local format written for external tools such as DuckDB.
+- "ETW destination" was starting to mean both the whole EventSource surface and the mirrored user-signal path into it — resolved: use **ETW provider** for the overall diagnostics surface and **ETW destination** for the user-signal mirroring path.

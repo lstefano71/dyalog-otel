@@ -1,9 +1,9 @@
 namespace Dyalog.OTel.Destinations;
 
 /// <summary>
-/// Contract for all telemetry destinations. Implementations are internal
-/// to the DLL (no runtime plugin loading). Each destination is owned by
-/// a pipeline and called only from background consumer threads.
+/// Contract for all telemetry destinations. Implementations may live in
+/// the core DLL or in companion DLLs, but each destination is still owned
+/// by a pipeline and called only from background consumer threads.
 /// </summary>
 public interface IDestination : IDisposable
 {
@@ -29,11 +29,16 @@ public interface IDestination : IDisposable
     void Shutdown();
 }
 
+public interface IResourceAwareDestination
+{
+    void SetResource(Dictionary<string, string> resource);
+}
+
 /// <summary>
 /// Marker for destinations that need raw histogram observations in addition to
 /// the pipeline's aggregated histogram export path.
 /// </summary>
-internal interface IRawHistogramObservationDestination
+public interface IRawHistogramObservationDestination
 {
     void WriteRawHistogramMetrics(ReadOnlySpan<Channels.MetricPoint> batch);
 }

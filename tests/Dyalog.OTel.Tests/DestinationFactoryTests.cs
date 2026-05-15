@@ -8,34 +8,25 @@ public class DestinationFactoryTests
     [Fact]
     public void FileDestination_CanonicalizesPath()
     {
-        var config = new DestinationConfig
-        {
-            Type = "file",
-            Properties = new Dictionary<string, string>
-            {
-                ["path"] = @"C:\logs\..\temp\evil.jsonl"
-            }
-        };
-
-        var dest = DestinationFactory.Create(config) as JsonlFileDestination;
+        var dest = new JsonlFileDestination(
+            @"C:\logs\..\temp\evil.jsonl",
+            RotationPeriod.Monthly,
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "log", "span", "metric" });
         Assert.NotNull(dest);
     }
 
     [Fact]
-    public void UnknownDestinationType_ReturnsNull()
+    public void UnknownDestinationType_Throws()
     {
         var config = new DestinationConfig { Type = "foobar" };
-        var result = DestinationFactory.Create(config);
-        Assert.Null(result);
+        Assert.Throws<InvalidOperationException>(() => DestinationFactory.Create(config));
     }
 
     [Fact]
-    public void OtlpType_ReturnsDestination()
+    public void PluginBackedDestination_RequiresPublishedNativeCompanion()
     {
         var config = new DestinationConfig { Type = "otlp" };
-        var result = DestinationFactory.Create(config);
-        Assert.NotNull(result);
-        result.Dispose();
+        Assert.Throws<InvalidOperationException>(() => DestinationFactory.Create(config));
     }
 
     [Fact]

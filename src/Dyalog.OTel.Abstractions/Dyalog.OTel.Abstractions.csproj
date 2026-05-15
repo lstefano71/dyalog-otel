@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\Dyalog.OTel\Channels\Common.cs" Link="Channels\Common.cs" />
+    <Compile Include="..\Dyalog.OTel\Channels\LogRecord.cs" Link="Channels\LogRecord.cs" />
+    <Compile Include="..\Dyalog.OTel\Channels\SpanRecord.cs" Link="Channels\SpanRecord.cs" />
+    <Compile Include="..\Dyalog.OTel\Channels\MetricPoint.cs" Link="Channels\MetricPoint.cs" />
+    <Compile Include="..\Dyalog.OTel\Templates\TemplateSnapshot.cs" Link="Templates\TemplateSnapshot.cs" />
+    <Compile Include="..\Dyalog.OTel\Destinations\IDestination.cs" Link="Destinations\IDestination.cs" />
+  </ItemGroup>
+</Project>

@@ -125,21 +125,6 @@ public class OtlpJsonTests
     }
 
     [Fact]
-    public void DestinationFactory_CreatesOtlpDestination()
-    {
-        var config = new Config.DestinationConfig
-        {
-            Type = "otlp",
-            Properties = new() { ["endpoint"] = "http://localhost:4318" }
-        };
-        var dest = Destinations.DestinationFactory.Create(config);
-        Assert.NotNull(dest);
-        // Default OTLP protocol is protobuf
-        Assert.IsType<OtlpProtobufDestination>(dest);
-        dest!.Dispose();
-    }
-
-    [Fact]
     public void OtlpDestination_SetResource_InjectsAttributes()
     {
         var dest = new OtlpJsonDestination("http://localhost:4318");
@@ -152,22 +137,4 @@ public class OtlpJsonTests
         dest.Dispose();
     }
 
-    [Fact]
-    public void DestinationFactory_ParsesHeaders()
-    {
-        var config = new Config.DestinationConfig
-        {
-            Type = "otlp",
-            Properties = new()
-            {
-                ["endpoint"] = "http://localhost:4318",
-                ["headers"] = "Authorization=Bearer token123, X-Custom=value",
-                ["protocol"] = "json"
-            }
-        };
-        var dest = Destinations.DestinationFactory.Create(config);
-        Assert.NotNull(dest);
-        Assert.IsType<OtlpJsonDestination>(dest);
-        dest!.Dispose();
-    }
 }

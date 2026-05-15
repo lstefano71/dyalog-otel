@@ -12,79 +12,11 @@ internal static class DestinationFactory
     {
         return config.Type.ToLowerInvariant() switch
         {
-            "file" => CreateFile(config),
-            "http" => CreateHttp(config),
-            "otlp" => CreateOtlp(config),
             "text" => CreateText(config),
             "console" => new ConsoleDestination(),
+            "file" or "http" or "otlp" => DestinationFamilyLoader.Create(config),
             _ => UnknownType(config.Type)
         };
-    }
-
-    private static IDestination CreateOtlp(DestinationConfig config)
-    {
-        string endpoint = config.Properties.GetValueOrDefault("endpoint", "http://localhost:4318");
-        Dictionary<string, string>? headers = null;
-        if (config.Properties.TryGetValue("headers", out var headerStr))
-        {
-            headers = new();
-            foreach (var pair in headerStr.Split(',', StringSplitOptions.TrimEntries))
-            {
-                int eq = pair.IndexOf('=');
-                if (eq > 0)
-                    headers[pair[..eq].Trim()] = pair[(eq + 1)..].Trim();
-            }
-        }
-
-        string protocol = config.Properties.GetValueOrDefault("protocol", "")!;
-        if (string.IsNullOrEmpty(protocol))
-            protocol = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_PROTOCOL") ?? "";
-
-        return protocol.ToLowerInvariant() switch
-        {
-            "json" or "http/json" => new OtlpJsonDestination(endpoint, headers),
-            "protobuf" or "grpc" or "http/protobuf" => new OtlpProtobufDestination(endpoint, headers),
-            _ => new OtlpProtobufDestination(endpoint, headers) // protobuf is the OTLP default
-        };
-    }
-
-    private static IDestination? UnknownType(string type)
-    {
-        Console.Error.WriteLine($"[dyalog-otel] WARNING: Unknown destination type '{type}'. Supported: file, http, otlp, text, console.");
-        return null;
-    }
-
-    private static JsonlFileDestination CreateFile(DestinationConfig config)
-    {
-        string rawPath = config.Properties.GetValueOrDefault("path", "otel.jsonl");
-        string path = Path.GetFullPath(rawPath);
-        string rotateStr = config.Properties.GetValueOrDefault("rotate", "monthly");
-        var rotation = rotateStr.ToLowerInvariant() switch
-        {
-            "hourly" => RotationPeriod.Hourly,
-            "daily" => RotationPeriod.Daily,
-            "monthly" => RotationPeriod.Monthly,
-            "none" => RotationPeriod.None,
-            _ => RotationPeriod.Monthly
-        };
-        return new JsonlFileDestination(path, rotation, config.Signals);
-    }
-
-    private static JsonlHttpDestination CreateHttp(DestinationConfig config)
-    {
-        string url = config.Properties.GetValueOrDefault("url", "http://localhost:8080");
-        Dictionary<string, string>? headers = null;
-        if (config.Properties.TryGetValue("headers", out var headerStr))
-        {
-            headers = new();
-            foreach (var pair in headerStr.Split(',', StringSplitOptions.TrimEntries))
-            {
-                int eq = pair.IndexOf('=');
-                if (eq > 0)
-                    headers[pair[..eq].Trim()] = pair[(eq + 1)..].Trim();
-            }
-        }
-        return new JsonlHttpDestination(url, config.Signals, headers);
     }
 
     private static TextDestination CreateText(DestinationConfig config)
@@ -92,6 +24,10 @@ internal static class DestinationFactory
         var options = TextDestinationConfig.Parse(config);
         return new TextDestination(options);
     }
+
+    private static IDestination UnknownType(string type) =>
+        throw new InvalidOperationException(
+            $"Unknown destination type '{type}'. Supported: file, http, otlp, text, console.");
 }
 
 /// <summary>

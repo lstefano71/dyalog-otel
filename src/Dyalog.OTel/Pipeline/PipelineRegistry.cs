@@ -120,15 +120,11 @@ public static class PipelineRegistry
         var autoDetected = ResourceDetector.Detect();
         pipeline.Resource = ResourceDetector.Merge(autoDetected, config.Resource);
 
-        // Inject resource attributes into OTLP destinations
+        // Inject resource attributes into destinations that need them
         foreach (var dest in destinations)
         {
-            if (dest is OtlpJsonDestination otlpJson)
-                otlpJson.SetResource(pipeline.Resource);
-            else if (dest is OtlpProtobufDestination otlpProto)
-                otlpProto.SetResource(pipeline.Resource);
-            else if (dest is TextDestination text)
-                text.SetResource(pipeline.Resource);
+            if (dest is IResourceAwareDestination resourceAware)
+                resourceAware.SetResource(pipeline.Resource);
         }
 
         return pipeline;

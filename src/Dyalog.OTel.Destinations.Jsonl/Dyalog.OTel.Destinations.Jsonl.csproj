@@ -1,0 +1,23 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishAot>true</PublishAot>
+    <IsAotCompatible>true</IsAotCompatible>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Description>NativeAOT companion DLL for JSONL destinations</Description>
+    <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Dyalog.OTel.Abstractions\Dyalog.OTel.Abstractions.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Dyalog.OTel.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\Dyalog.OTel\Destinations\JsonlFileDestination.cs" Link="Destinations\JsonlFileDestination.cs" />
+    <Compile Include="..\Dyalog.OTel\Destinations\JsonlHttpDestination.cs" Link="Destinations\JsonlHttpDestination.cs" />
+  </ItemGroup>
+</Project>

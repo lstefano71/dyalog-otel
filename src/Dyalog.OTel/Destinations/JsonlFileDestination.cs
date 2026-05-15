@@ -129,14 +129,6 @@ public sealed class JsonlFileDestination : IDestination
     };
 }
 
-public enum RotationPeriod
-{
-    None,
-    Hourly,
-    Daily,
-    Monthly
-}
-
 /// <summary>
 /// Source-generated JSON serialization context for NativeAOT compatibility.
 /// </summary>

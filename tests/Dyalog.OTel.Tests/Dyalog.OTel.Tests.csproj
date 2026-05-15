@@ -15,7 +15,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\Dyalog.OTel.Abstractions\Dyalog.OTel.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\Dyalog.OTel\Dyalog.OTel.csproj" />
+    <ProjectReference Include="..\..\src\Dyalog.OTel.Destinations.Jsonl\Dyalog.OTel.Destinations.Jsonl.csproj" />
+    <ProjectReference Include="..\..\src\Dyalog.OTel.Destinations.Otlp\Dyalog.OTel.Destinations.Otlp.csproj" />
   </ItemGroup>
 
   <ItemGroup>
