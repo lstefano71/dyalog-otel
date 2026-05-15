@@ -397,12 +397,15 @@ public sealed class Pipeline : IDisposable
         _spanChannel.Writer.TryComplete();
         _metricChannel.Writer.TryComplete();
 
-        try
+        if (_logConsumer != null && _spanConsumer != null && _metricConsumer != null)
         {
-            Task.WaitAll([_logConsumer!, _spanConsumer!, _metricConsumer!],
-                TimeSpan.FromSeconds(10));
+            try
+            {
+                Task.WaitAll([_logConsumer, _spanConsumer, _metricConsumer],
+                    TimeSpan.FromSeconds(10));
+            }
+            catch (AggregateException) { /* consumer may have faulted — destinations still need cleanup */ }
         }
-        catch (AggregateException) { /* consumer may have faulted — destinations still need cleanup */ }
 
         foreach (var d in _destinations)
             d.Shutdown();
