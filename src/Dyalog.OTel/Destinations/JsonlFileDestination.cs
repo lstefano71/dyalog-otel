@@ -34,33 +34,40 @@ public sealed class JsonlFileDestination : IDestination
     public void WriteLogs(ReadOnlySpan<LogRecord> batch)
     {
         if (!_signals.Contains("log")) return;
+        // Serialize outside the lock to minimize lock hold time
+        var sb = new System.Text.StringBuilder(batch.Length * 128);
+        foreach (var record in batch)
+            sb.AppendLine(JsonSerializer.Serialize(record, JsonContext.Default.LogRecord));
         lock (_writeLock)
         {
             EnsureWriter();
-            foreach (var record in batch)
-                _writer!.WriteLine(JsonSerializer.Serialize(record, JsonContext.Default.LogRecord));
+            _writer!.Write(sb);
         }
     }
 
     public void WriteSpans(ReadOnlySpan<SpanRecord> batch)
     {
         if (!_signals.Contains("span")) return;
+        var sb = new System.Text.StringBuilder(batch.Length * 192);
+        foreach (var record in batch)
+            sb.AppendLine(JsonSerializer.Serialize(record, JsonContext.Default.SpanRecord));
         lock (_writeLock)
         {
             EnsureWriter();
-            foreach (var record in batch)
-                _writer!.WriteLine(JsonSerializer.Serialize(record, JsonContext.Default.SpanRecord));
+            _writer!.Write(sb);
         }
     }
 
     public void WriteMetrics(ReadOnlySpan<MetricPoint> batch)
     {
         if (!_signals.Contains("metric")) return;
+        var sb = new System.Text.StringBuilder(batch.Length * 96);
+        foreach (var record in batch)
+            sb.AppendLine(JsonSerializer.Serialize(record, JsonContext.Default.MetricPoint));
         lock (_writeLock)
         {
             EnsureWriter();
-            foreach (var record in batch)
-                _writer!.WriteLine(JsonSerializer.Serialize(record, JsonContext.Default.MetricPoint));
+            _writer!.Write(sb);
         }
     }
 

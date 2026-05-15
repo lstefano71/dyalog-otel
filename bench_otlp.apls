@@ -14,7 +14,7 @@
 ⎕IO←0 ⋄ ⎕ML←1
 
 dll←'##DLLPATH##'
-N←50000  ⍝ iterations per benchmark
+N←50000  ⍝ iterations per benchmark (lower than local-only bench to account for HTTP RTT)
 
 ⍝ --- helpers ---
 now←{15 ⎕DT 'Z'}

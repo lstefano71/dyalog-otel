@@ -21,7 +21,6 @@
   <ItemGroup>
     <PackageReference Include="HdrHistogram" Version="2.*" />
     <PackageReference Include="LightProto" Version="*" />
-    <PackageReference Include="Open.ChannelExtensions" Version="9.3.0" />
   </ItemGroup>
   <!-- Import the DWA shim compilation target -->
   <Import Project="..\..\..\bridge-dwa\ModernDotnet\src\Dyalog.DWA.Generators\build\Dyalog.DWA.Generators.targets" />

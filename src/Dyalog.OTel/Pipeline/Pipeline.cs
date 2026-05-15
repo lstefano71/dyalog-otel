@@ -6,13 +6,12 @@ using Dyalog.OTel.Config;
 using Dyalog.OTel.Destinations;
 using Dyalog.OTel.Diagnostics;
 using Dyalog.OTel.Templates;
-using Open.ChannelExtensions;
 
 namespace Dyalog.OTel.Pipeline;
 
 /// <summary>
 /// A telemetry pipeline: owns three typed channels (log/span/metric),
-/// batching readers (via Open.ChannelExtensions), and a set of destinations.
+/// batch consumers, and a set of destinations.
 /// </summary>
 public sealed class Pipeline : IDisposable
 {
@@ -20,13 +19,24 @@ public sealed class Pipeline : IDisposable
     private readonly Channel<SpanRecord> _spanChannel;
     private readonly Channel<MetricPoint> _metricChannel;
 
-    private readonly BatchingChannelReader<LogRecord, List<LogRecord>> _logBatcher;
-    private readonly BatchingChannelReader<SpanRecord, List<SpanRecord>> _spanBatcher;
-    private readonly BatchingChannelReader<MetricPoint, List<MetricPoint>> _metricBatcher;
+    private readonly Channel<List<LogRecord>> _logBatches;
+    private readonly Channel<List<SpanRecord>> _spanBatches;
+    private readonly Channel<List<MetricPoint>> _metricBatches;
 
     private Task? _logConsumer;
     private Task? _spanConsumer;
     private Task? _metricConsumer;
+
+    private const int ConsumerWakeIntervalMs = 50;
+    private const int FlushTimeoutMs = 10_000;
+    private long _flushEpoch;
+
+    private readonly int _logBatchSize;
+    private readonly int _spanBatchSize;
+    private readonly int _metricBatchSize;
+    private readonly int _logBatchIntervalMs;
+    private readonly int _spanBatchIntervalMs;
+    private readonly int _metricBatchIntervalMs;
 
     // Watermark counters: items attempted (success or failure), for flush synchronization
     private long _logProcessed;
@@ -48,24 +58,25 @@ public sealed class Pipeline : IDisposable
 
         var opts = new BoundedChannelOptions(channelCapacity)
         {
-            FullMode = BoundedChannelFullMode.DropWrite,
-            SingleReader = false, // ForceBatch reads from APL thread concurrently with consumer
+            // TryWrite must return false on a full channel so drops are counted accurately.
+            FullMode = BoundedChannelFullMode.Wait,
+            SingleReader = true,
             SingleWriter = true   // APL interpreter is single-threaded
         };
 
         _logChannel = Channel.CreateBounded<LogRecord>(opts);
         _spanChannel = Channel.CreateBounded<SpanRecord>(opts);
         _metricChannel = Channel.CreateBounded<MetricPoint>(opts);
+        _logBatches = CreateBatchChannel<LogRecord>();
+        _spanBatches = CreateBatchChannel<SpanRecord>();
+        _metricBatches = CreateBatchChannel<MetricPoint>();
 
-        _logBatcher = _logChannel.Reader
-            .Batch(batchConfig.LogSize, singleReader: true)
-            .WithTimeout(batchConfig.LogIntervalMs);
-        _spanBatcher = _spanChannel.Reader
-            .Batch(batchConfig.SpanSize, singleReader: true)
-            .WithTimeout(batchConfig.SpanIntervalMs);
-        _metricBatcher = _metricChannel.Reader
-            .Batch(batchConfig.MetricSize, singleReader: true)
-            .WithTimeout(batchConfig.MetricIntervalMs);
+        _logBatchSize = ValidateBatchSize(batchConfig.LogSize, nameof(batchConfig.LogSize));
+        _spanBatchSize = ValidateBatchSize(batchConfig.SpanSize, nameof(batchConfig.SpanSize));
+        _metricBatchSize = ValidateBatchSize(batchConfig.MetricSize, nameof(batchConfig.MetricSize));
+        _logBatchIntervalMs = batchConfig.LogIntervalMs;
+        _spanBatchIntervalMs = batchConfig.SpanIntervalMs;
+        _metricBatchIntervalMs = batchConfig.MetricIntervalMs;
     }
 
     public void Start()
@@ -73,7 +84,12 @@ public sealed class Pipeline : IDisposable
         foreach (var d in _destinations)
             d.Init();
 
-        _logConsumer = Task.Run(async () => await _logBatcher.ReadAll(
+        var logBatcher = Task.Run(() => BatchChannel(
+            _logChannel.Reader,
+            _logBatches.Writer,
+            _logBatchSize,
+            _logBatchIntervalMs));
+        var logExporter = Task.Run(() => ExportBatches(_logBatches.Reader,
             (List<LogRecord> batch) =>
             {
                 try
@@ -82,11 +98,17 @@ public sealed class Pipeline : IDisposable
                         d.WriteLogs(CollectionsMarshal.AsSpan(batch));
                     Metrics.LogExported(batch.Count);
                 }
-                catch { Metrics.ExportError(); }
+                catch (Exception ex) { Metrics.ExportError(); Console.Error.WriteLine($"[LOG EXPORT ERR] {ex}"); }
                 finally { Interlocked.Add(ref _logProcessed, batch.Count); }
             }));
+        _logConsumer = Task.WhenAll(logBatcher, logExporter);
 
-        _spanConsumer = Task.Run(async () => await _spanBatcher.ReadAll(
+        var spanBatcher = Task.Run(() => BatchChannel(
+            _spanChannel.Reader,
+            _spanBatches.Writer,
+            _spanBatchSize,
+            _spanBatchIntervalMs));
+        var spanExporter = Task.Run(() => ExportBatches(_spanBatches.Reader,
             (List<SpanRecord> batch) =>
             {
                 try
@@ -95,17 +117,24 @@ public sealed class Pipeline : IDisposable
                         d.WriteSpans(CollectionsMarshal.AsSpan(batch));
                     Metrics.SpanExported(batch.Count);
                 }
-                catch { Metrics.ExportError(); }
+                catch (Exception ex) { Metrics.ExportError(); Console.Error.WriteLine($"[SPAN EXPORT ERR] {ex}"); }
                 finally { Interlocked.Add(ref _spanProcessed, batch.Count); }
             }));
+        _spanConsumer = Task.WhenAll(spanBatcher, spanExporter);
 
-        _metricConsumer = Task.Run(async () => await _metricBatcher.ReadAll(
+        var metricBatcher = Task.Run(() => BatchChannel(
+            _metricChannel.Reader,
+            _metricBatches.Writer,
+            _metricBatchSize,
+            _metricBatchIntervalMs));
+        var metricExporter = Task.Run(() => ExportBatches(_metricBatches.Reader,
             (List<MetricPoint> batch) =>
             {
                 try { WriteMetricBatch(CollectionsMarshal.AsSpan(batch)); }
-                catch { Metrics.ExportError(); }
+                catch (Exception ex) { Metrics.ExportError(); Console.Error.WriteLine($"[METRIC EXPORT ERR] {ex}"); }
                 finally { Interlocked.Add(ref _metricProcessed, batch.Count); }
             }));
+        _metricConsumer = Task.WhenAll(metricBatcher, metricExporter);
     }
 
     // ── Hot-path enqueue methods (called from interpreter thread) ──
@@ -211,28 +240,26 @@ public sealed class Pipeline : IDisposable
         long spanTarget = snap.SpansEnqueued;
         long metricTarget = snap.MetricsEnqueued;
 
-        // Push any partial batches into the consumer pipeline
-        _logBatcher.ForceBatch();
-        _spanBatcher.ForceBatch();
-        _metricBatcher.ForceBatch();
+        // Wake consumers so they emit any partial batch up to this watermark.
+        Interlocked.Increment(ref _flushEpoch);
 
         // Wait until consumers have processed everything up to the watermark
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        SpinWait spinner = new();
-        while (sw.ElapsedMilliseconds < 30_000)
+        while (sw.ElapsedMilliseconds < FlushTimeoutMs)
         {
-            if (Interlocked.Read(ref _logProcessed) >= logTarget
-                && Interlocked.Read(ref _spanProcessed) >= spanTarget
-                && Interlocked.Read(ref _metricProcessed) >= metricTarget)
+            long lp = Interlocked.Read(ref _logProcessed);
+            long sp = Interlocked.Read(ref _spanProcessed);
+            long mp = Interlocked.Read(ref _metricProcessed);
+
+            if (lp >= logTarget && sp >= spanTarget && mp >= metricTarget)
                 break;
 
-            // Bail early if a consumer has faulted (counters will never advance)
             if (_logConsumer?.IsFaulted == true
                 || _spanConsumer?.IsFaulted == true
                 || _metricConsumer?.IsFaulted == true)
                 break;
 
-            spinner.SpinOnce();
+            Thread.Sleep(1);
         }
 
         FlushHistograms();
@@ -241,10 +268,131 @@ public sealed class Pipeline : IDisposable
             d.Flush();
     }
 
+    private static Channel<List<T>> CreateBatchChannel<T>() =>
+        Channel.CreateUnbounded<List<T>>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = true
+        });
+
+    private async Task BatchChannel<T>(
+        ChannelReader<T> reader,
+        ChannelWriter<List<T>> writer,
+        int batchSize,
+        int batchIntervalMs)
+    {
+        var batch = new List<T>(batchSize);
+        long batchStartedAt = 0;
+        long seenFlushEpoch = Interlocked.Read(ref _flushEpoch);
+
+        try
+        {
+            while (true)
+            {
+                while (batch.Count < batchSize && reader.TryRead(out var item))
+                {
+                    if (batch.Count == 0)
+                        batchStartedAt = Environment.TickCount64;
+                    batch.Add(item);
+                }
+
+                long currentFlushEpoch = Interlocked.Read(ref _flushEpoch);
+                long now = Environment.TickCount64;
+                bool flushRequested = currentFlushEpoch != seenFlushEpoch;
+                bool intervalElapsed = batch.Count > 0
+                    && batchIntervalMs > 0
+                    && now - batchStartedAt >= batchIntervalMs;
+                bool completed = reader.Completion.IsCompleted;
+
+                if (batch.Count >= batchSize || (batch.Count > 0 && (flushRequested || intervalElapsed || completed)))
+                {
+                    EmitBatch(writer, ref batch, batchSize);
+                    batchStartedAt = 0;
+
+                    if (flushRequested)
+                        seenFlushEpoch = currentFlushEpoch;
+                    continue;
+                }
+
+                if (flushRequested)
+                {
+                    seenFlushEpoch = currentFlushEpoch;
+                    continue;
+                }
+
+                if (completed)
+                {
+                    writer.TryComplete();
+                    return;
+                }
+
+                int waitMs = GetConsumerWaitMs(batchIntervalMs, batchStartedAt, batch.Count);
+                using var wake = new CancellationTokenSource(waitMs);
+                try
+                {
+                    if (!await reader.WaitToReadAsync(wake.Token).ConfigureAwait(false))
+                    {
+                        EmitBatch(writer, ref batch, batchSize);
+                        writer.TryComplete();
+                        return;
+                    }
+                }
+                catch (OperationCanceledException) when (wake.IsCancellationRequested)
+                {
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            writer.TryComplete(ex);
+            throw;
+        }
+    }
+
+    private static void EmitBatch<T>(ChannelWriter<List<T>> writer, ref List<T> batch, int batchSize)
+    {
+        if (batch.Count == 0)
+            return;
+        if (!writer.TryWrite(batch))
+            throw new InvalidOperationException("Batch channel rejected a telemetry batch.");
+        batch = new List<T>(batchSize);
+    }
+
+    private static async Task ExportBatches<T>(
+        ChannelReader<List<T>> reader,
+        Action<List<T>> consume)
+    {
+        while (await reader.WaitToReadAsync().ConfigureAwait(false))
+        {
+            while (reader.TryRead(out var batch))
+                consume(batch);
+        }
+    }
+
+    private static int ValidateBatchSize(int batchSize, string name)
+    {
+        if (batchSize < 1)
+            throw new ArgumentOutOfRangeException(name, batchSize, "Batch size must be at least 1.");
+        return batchSize;
+    }
+
+    private static int GetConsumerWaitMs(int batchIntervalMs, long batchStartedAt, int batchCount)
+    {
+        int waitMs = ConsumerWakeIntervalMs;
+        if (batchCount > 0 && batchIntervalMs > 0)
+        {
+            long remaining = batchIntervalMs - (Environment.TickCount64 - batchStartedAt);
+            if (remaining <= 0)
+                return 1;
+            if (remaining < waitMs)
+                waitMs = (int)remaining;
+        }
+        return waitMs;
+    }
+
     public void Shutdown()
     {
-        // Completing the writers triggers the batchers' automatic final flush,
-        // then ReadAll processes all remaining batches and returns.
+        // Completing the writers lets consumers drain any remaining items and return.
         _logChannel.Writer.TryComplete();
         _spanChannel.Writer.TryComplete();
         _metricChannel.Writer.TryComplete();
