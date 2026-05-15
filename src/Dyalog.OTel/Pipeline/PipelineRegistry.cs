@@ -123,8 +123,10 @@ public static class PipelineRegistry
         // Inject resource attributes into OTLP destinations
         foreach (var dest in destinations)
         {
-            if (dest is OtlpJsonDestination otlpDest)
-                otlpDest.SetResource(pipeline.Resource);
+            if (dest is OtlpJsonDestination otlpJson)
+                otlpJson.SetResource(pipeline.Resource);
+            else if (dest is OtlpProtobufDestination otlpProto)
+                otlpProto.SetResource(pipeline.Resource);
         }
 
         return pipeline;

@@ -9,7 +9,7 @@ Built as a NativeAOT C# DLL using the [DWA Kit](https://github.com/user/bridge-d
 - **Logs** — plain text or Serilog-style message templates (`'Order {OrderId} placed for {Amount}'`)
 - **Traces** — explicit span start/end with parent-child nesting, log↔span correlation
 - **Metrics** — counters, gauges, histograms
-- **Destinations** — JSONL file (with time-based rotation), JSONL-over-HTTP, console fallback, OTLP (planned)
+- **Destinations** — JSONL file (with time-based rotation), JSONL-over-HTTP, OTLP/Protobuf (default), OTLP/JSON, console fallback
 - **Config** — INI file with 4-layer precedence (defaults → file → env vars → builder calls)
 - **Attribute templates** — pre-built frozen snapshots for recurring key-value sets
 
@@ -62,6 +62,22 @@ Measures per-call hot-path overhead in microseconds for:
 Reports net overhead (subtracting a bare-loop baseline), throughput in calls/sec, and drop statistics.
 
 Uses `bench_otel.ini` (auto-detected).
+
+## Test OTLP/Protobuf with Fluent Bit
+
+Download and unzip [Fluent Bit](https://fluentbit.io/). Then:
+
+```powershell
+# Terminal 1 — start Fluent Bit as an OTLP collector
+D:\path\to\fluent-bit\bin\fluent-bit.exe -c test_otlp_fluentbit.conf
+
+# Terminal 2 — send logs, spans, and metrics via OTLP/Protobuf
+.\run_apl.ps1 test_otlp_fluentbit.apls
+```
+
+Fluent Bit's terminal will show the received data: log bodies with severity and template-extracted attributes, span traces with IDs and durations, and metric values.
+
+Uses `test_otlp_fluentbit.ini` (auto-detected) which configures an `otlp` destination with `protocol=protobuf` pointing at `localhost:4318`.
 
 ## Configuration
 
