@@ -173,12 +173,11 @@ public sealed class Pipeline : IDisposable
             handle = 1;
         }
         byte[] spanId = GenerateId(8);
-        byte[] resolvedTraceId = traceId ?? (parentHandle != 0 && _activeSpans.TryGetValue(parentHandle, out var parent)
-            ? parent.TraceId
-            : GenerateId(16));
-        byte[]? parentSpanId = parentHandle != 0 && _activeSpans.TryGetValue(parentHandle, out var p)
-            ? p.SpanId
-            : null;
+        ActiveSpan? parent = null;
+        if (parentHandle != 0)
+            _activeSpans.TryGetValue(parentHandle, out parent);
+        byte[] resolvedTraceId = traceId ?? parent?.TraceId ?? GenerateId(16);
+        byte[]? parentSpanId = parent?.SpanId;
 
         _activeSpans[handle] = new ActiveSpan
         {

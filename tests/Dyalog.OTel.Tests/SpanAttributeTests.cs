@@ -106,4 +106,30 @@ public class SpanAttributeTests
 
         pipeline.Shutdown();
     }
+
+    [Fact]
+    public void ExternalTraceId_WithParentHandle_KeepsParentSpanId()
+    {
+        var dest = new TestDestination();
+        var pipeline = new PipelineInstance(new List<IDestination> { dest }, new BatchConfig());
+        pipeline.Start();
+
+        int parentHandle = pipeline.StartSpan("parent", 0, null);
+        var parentContext = pipeline.GetSpanContext(parentHandle);
+        Assert.NotNull(parentContext);
+
+        byte[] externalTraceId = Enumerable.Range(1, 16).Select(i => (byte)i).ToArray();
+        int childHandle = pipeline.StartSpan("child", parentHandle, externalTraceId);
+        pipeline.EndSpan(childHandle, null, null);
+        pipeline.EndSpan(parentHandle, null, null);
+
+        pipeline.Flush();
+        Thread.Sleep(200);
+
+        var child = Assert.Single(dest.Spans, span => span.Name == "child");
+        Assert.Equal(externalTraceId, child.TraceId);
+        Assert.Equal(parentContext.Value.SpanId, child.ParentSpanId);
+
+        pipeline.Shutdown();
+    }
 }

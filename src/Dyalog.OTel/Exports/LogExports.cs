@@ -26,7 +26,8 @@ public static class LogExports
 
         long timestamp = Pipeline.Pipeline.GetTimestampNano();
         string body = msg.HasValue ? msg.ReadString() : "";
-        string tplName = templateName.HasValue ? templateName.ReadString() : "";
+        string tplName = ExportHelpers.ReadOptionalString(templateName);
+        int attrCount = attrs.HasValue ? attrs.Bound() : 0;
 
         // Resolve template snapshot
         TemplateSnapshot? snapshot = null;
@@ -35,16 +36,20 @@ public static class LogExports
 
         // Parse message template and extract attributes from fillers
         OTelAttribute[]? attributes = null;
-        var parsed = TemplateCache.Instance.GetOrParse(body);
-        if (parsed.HasPlaceholders && attrs.HasValue && attrs.Bound() > 0)
+        MessageTemplate? parsed = null;
+        if (attrCount > 0)
         {
-            // Positional fillers mode: attrs contains values, template has names
-            attributes = ExportHelpers.ReadFillers(attrs, parsed.PlaceholderNames);
-        }
-        else if (attrs.HasValue && attrs.Bound() > 0 && attrs.IsNested())
-        {
-            // Key-value pairs mode
-            attributes = ExportHelpers.ReadAttributes(attrs);
+            parsed = TemplateCache.Instance.GetOrParse(body);
+            if (parsed.HasPlaceholders)
+            {
+                // Positional fillers mode: attrs contains values, template has names
+                attributes = ExportHelpers.ReadFillers(attrs, parsed.PlaceholderNames);
+            }
+            else if (attrs.IsNested())
+            {
+                // Key-value pairs mode
+                attributes = ExportHelpers.ReadAttributes(attrs);
+            }
         }
 
         var record = new LogRecord
@@ -52,7 +57,7 @@ public static class LogExports
             TimestampUnixNano = timestamp,
             SeverityNumber = severity,
             SeverityText = SeverityToText(severity),
-            Body = parsed.HasPlaceholders && attributes != null
+            Body = parsed?.HasPlaceholders == true && attributes != null
                 ? parsed.Render(attributes)
                 : body,
             Template = snapshot,
@@ -75,18 +80,23 @@ public static class LogExports
 
         long timestamp = Pipeline.Pipeline.GetTimestampNano();
         string body = msg.HasValue ? msg.ReadString() : "";
-        string tplName = templateName.HasValue ? templateName.ReadString() : "";
+        string tplName = ExportHelpers.ReadOptionalString(templateName);
+        int attrCount = attrs.HasValue ? attrs.Bound() : 0;
 
         TemplateSnapshot? snapshot = null;
         if (!string.IsNullOrEmpty(tplName))
             snapshot = pipe.Templates.TryGet(tplName);
 
         OTelAttribute[]? attributes = null;
-        var parsed = TemplateCache.Instance.GetOrParse(body);
-        if (parsed.HasPlaceholders && attrs.HasValue && attrs.Bound() > 0)
-            attributes = ExportHelpers.ReadFillers(attrs, parsed.PlaceholderNames);
-        else if (attrs.HasValue && attrs.Bound() > 0 && attrs.IsNested())
-            attributes = ExportHelpers.ReadAttributes(attrs);
+        MessageTemplate? parsed = null;
+        if (attrCount > 0)
+        {
+            parsed = TemplateCache.Instance.GetOrParse(body);
+            if (parsed.HasPlaceholders)
+                attributes = ExportHelpers.ReadFillers(attrs, parsed.PlaceholderNames);
+            else if (attrs.IsNested())
+                attributes = ExportHelpers.ReadAttributes(attrs);
+        }
 
         // Resolve span context for correlation
         byte[]? traceId = null, spanId = null;
@@ -105,7 +115,7 @@ public static class LogExports
             TimestampUnixNano = timestamp,
             SeverityNumber = severity,
             SeverityText = SeverityToText(severity),
-            Body = parsed.HasPlaceholders && attributes != null
+            Body = parsed?.HasPlaceholders == true && attributes != null
                 ? parsed.Render(attributes)
                 : body,
             TraceId = traceId,

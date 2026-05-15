@@ -23,19 +23,15 @@ public static class MetricExports
 
         long timestamp = Pipeline.Pipeline.GetTimestampNano();
         string name = metricName.HasValue ? metricName.ReadString() : "unnamed";
-        // ReadAsDoubles() handles APL type conversion (int→double etc.)
-        // Bound() > 0 guard avoids IndexOutOfRange on empty arrays
-        double val = 0.0;
-        if (value.HasValue && value.Bound() > 0)
-            val = value.ReadAsDoubles()[0];
-        string tplName = templateName.HasValue ? templateName.ReadString() : "";
+        double val = ExportHelpers.ReadFirstDouble(value);
+        string tplName = ExportHelpers.ReadOptionalString(templateName);
 
         TemplateSnapshot? snapshot = null;
         if (!string.IsNullOrEmpty(tplName))
             snapshot = pipe.Templates.TryGet(tplName);
 
         OTelAttribute[]? attributes = null;
-        if (attrs.HasValue && attrs.IsNested())
+        if (attrs.HasValue && attrs.Bound() > 0 && attrs.IsNested())
             attributes = ExportHelpers.ReadAttributes(attrs);
 
         var point = new MetricPoint

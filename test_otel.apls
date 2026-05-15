@@ -41,10 +41,18 @@ _←check 'status is healthy' 0 st
 pp_otel_log 0 9 'Hello from APL' '' ⍬
 _←check 'log plain (no error)' 1 1
 
+⍝ --- Log with placeholder-looking body but no fillers ---
+pp_otel_log 0 9 'Raw {Name}' '' ⍬
+_←check 'log raw placeholder (no error)' 1 1
+
 ⍝ --- Log with message template ---
 ⎕←'Log with template:'
 pp_otel_log 0 9 'Order {OrderId} placed for {Amount}' '' (42 99.5)
 _←check 'log template (no error)' 1 1
+
+⍝ --- Log with key-value attributes ---
+pp_otel_log 0 9 'Event with attrs' '' ('user' 'alice')
+_←check 'log attrs (no error)' 1 1
 
 ⍝ --- Span start/end ---
 ⎕←'Span:'
@@ -151,23 +159,28 @@ _←check 'logs exported after flush' 1 (0<stats2[0;1])
     ⎕←'  Logs: ',(⍕≢logs),'  Spans: ',(⍕≢spans),'  Metrics: ',⍕≢metrics
 
     ⍝ ── Log content ──
-    _←check 'file: 4 log records' 4 (≢logs)
+    _←check 'file: 6 log records' 6 (≢logs)
 
-    :If 4≤≢logs
+    :If 6≤≢logs
         _←check 'log[0] body' 'Hello from APL' (0⊃logs).body
         _←check 'log[0] severity' 'INFO' (0⊃logs).severityText
         _←check 'log[0] timestamp > 0' 1 (0<(0⊃logs).timestampUnixNano)
 
+        _←check 'log[1] body raw placeholder' 'Raw {Name}' (1⊃logs).body
+
         ⍝ Template-rendered body should contain the filler values
-        _←check 'log[1] body has "42"' 1 (∨/'42'⍷(1⊃logs).body)
-        _←check 'log[1] body has "99"' 1 (∨/'99'⍷(1⊃logs).body)
+        _←check 'log[2] body has "42"' 1 (∨/'42'⍷(2⊃logs).body)
+        _←check 'log[2] body has "99"' 1 (∨/'99'⍷(2⊃logs).body)
+
+        _←check 'log[3] attr key' 'user' (0⊃(3⊃logs).attributes).key
+        _←check 'log[3] attr value' 'alice' (0⊃(3⊃logs).attributes).value
 
         ⍝ Span-correlated log should have trace context
-        _←check 'log[2] body' 'Event inside span' (2⊃logs).body
-        _←check 'log[2] has traceId' 1 (0<≢(2⊃logs).traceId)
-        _←check 'log[2] has spanId' 1 (0<≢(2⊃logs).spanId)
+        _←check 'log[4] body' 'Event inside span' (4⊃logs).body
+        _←check 'log[4] has traceId' 1 (0<≢(4⊃logs).traceId)
+        _←check 'log[4] has spanId' 1 (0<≢(4⊃logs).spanId)
 
-        _←check 'log[3] body' 'Using template' (3⊃logs).body
+        _←check 'log[5] body' 'Using template' (5⊃logs).body
     :EndIf
 
     ⍝ ── Span content ──

@@ -3,8 +3,9 @@ using System.Threading;
 namespace Dyalog.OTel.Diagnostics;
 
 /// <summary>
-/// Atomic counters tracking pipeline health. Readable via otel_stats.
-/// All operations are lock-free (Interlocked).
+/// Counters tracking pipeline health. Readable via otel_stats.
+/// Export-side counters are updated atomically by background threads; enqueue/drop
+/// counters are written only by the interpreter thread and read with volatile loads.
 /// </summary>
 public sealed class InternalMetrics
 {
@@ -23,20 +24,18 @@ public sealed class InternalMetrics
 
     private long _exportErrors;
 
-    // Log counters
-    public void LogEnqueued() => Interlocked.Increment(ref _logsEnqueued);
+    // Interpreter-thread counters
+    public void LogEnqueued() => _logsEnqueued++;
+    public void LogDropped() => _logsDropped++;
+    public void SpanEnqueued() => _spansEnqueued++;
+    public void SpanDropped() => _spansDropped++;
+    public void MetricEnqueued() => _metricsEnqueued++;
+    public void MetricDropped() => _metricsDropped++;
+
+    // Background-thread counters
     public void LogExported(int count) => Interlocked.Add(ref _logsExported, count);
-    public void LogDropped() => Interlocked.Increment(ref _logsDropped);
-
-    // Span counters
-    public void SpanEnqueued() => Interlocked.Increment(ref _spansEnqueued);
     public void SpanExported(int count) => Interlocked.Add(ref _spansExported, count);
-    public void SpanDropped() => Interlocked.Increment(ref _spansDropped);
-
-    // Metric counters
-    public void MetricEnqueued() => Interlocked.Increment(ref _metricsEnqueued);
     public void MetricExported(int count) => Interlocked.Add(ref _metricsExported, count);
-    public void MetricDropped() => Interlocked.Increment(ref _metricsDropped);
 
     // Export errors
     public void ExportError() => Interlocked.Increment(ref _exportErrors);
@@ -44,15 +43,15 @@ public sealed class InternalMetrics
     /// <summary>Returns a snapshot of all counters.</summary>
     public MetricsSnapshot GetSnapshot() => new()
     {
-        LogsEnqueued = Interlocked.Read(ref _logsEnqueued),
+        LogsEnqueued = Volatile.Read(ref _logsEnqueued),
         LogsExported = Interlocked.Read(ref _logsExported),
-        LogsDropped = Interlocked.Read(ref _logsDropped),
-        SpansEnqueued = Interlocked.Read(ref _spansEnqueued),
+        LogsDropped = Volatile.Read(ref _logsDropped),
+        SpansEnqueued = Volatile.Read(ref _spansEnqueued),
         SpansExported = Interlocked.Read(ref _spansExported),
-        SpansDropped = Interlocked.Read(ref _spansDropped),
-        MetricsEnqueued = Interlocked.Read(ref _metricsEnqueued),
+        SpansDropped = Volatile.Read(ref _spansDropped),
+        MetricsEnqueued = Volatile.Read(ref _metricsEnqueued),
         MetricsExported = Interlocked.Read(ref _metricsExported),
-        MetricsDropped = Interlocked.Read(ref _metricsDropped),
+        MetricsDropped = Volatile.Read(ref _metricsDropped),
         ExportErrors = Interlocked.Read(ref _exportErrors)
     };
 }

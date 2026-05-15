@@ -24,7 +24,7 @@ public static class SpanExports
         }
 
         string spanName = name.HasValue ? name.ReadString() : "unnamed";
-        string tplName = templateName.HasValue ? templateName.ReadString() : "";
+        string tplName = ExportHelpers.ReadOptionalString(templateName);
 
         // Read start-time template and attributes
         Templates.TemplateSnapshot? snapshot = null;
@@ -32,7 +32,7 @@ public static class SpanExports
             snapshot = pipe.Templates.TryGet(tplName);
 
         OTelAttribute[]? attributes = null;
-        if (attrs.HasValue && attrs.IsNested())
+        if (attrs.HasValue && attrs.Bound() > 0 && attrs.IsNested())
             attributes = ExportHelpers.ReadAttributes(attrs);
 
         // Start the span (allocates handle, generates trace/span IDs)
@@ -50,14 +50,14 @@ public static class SpanExports
         var pipe = PipelineRegistry.Resolve(pipeline);
         if (pipe == null) return;
 
-        string tplName = templateName.HasValue ? templateName.ReadString() : "";
+        string tplName = ExportHelpers.ReadOptionalString(templateName);
 
         TemplateSnapshot? snapshot = null;
         if (!string.IsNullOrEmpty(tplName))
             snapshot = pipe.Templates.TryGet(tplName);
 
         OTelAttribute[]? attributes = null;
-        if (attrs.HasValue && attrs.IsNested())
+        if (attrs.HasValue && attrs.Bound() > 0 && attrs.IsNested())
             attributes = ExportHelpers.ReadAttributes(attrs);
 
         pipe.EndSpan(spanHandle, attributes, snapshot);

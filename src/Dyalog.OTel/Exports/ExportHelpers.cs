@@ -9,6 +9,31 @@ namespace Dyalog.OTel.Exports;
 /// </summary>
 internal static class ExportHelpers
 {
+    public static string ReadOptionalString(Localp value)
+    {
+        if (!value.HasValue || value.Bound() == 0)
+            return "";
+        return value.ReadString();
+    }
+
+    public static double ReadFirstDouble(Localp value)
+    {
+        if (!value.HasValue || value.Bound() == 0)
+            return 0.0;
+
+        return value.ElType() switch
+        {
+            ELTYPES.APLDOUB => value.ReadElement<double>(0),
+            ELTYPES.APLLONG => value.ReadElement<int>(0),
+            ELTYPES.APLINTG => value.ReadElement<short>(0),
+            ELTYPES.APLSINT => value.ReadElement<sbyte>(0),
+            ELTYPES.APLBOOL => value.ReadBooleans()[0] ? 1.0 : 0.0,
+            ELTYPES.NET_INT64 => value.ReadElement<long>(0),
+            ELTYPES.NET_BYTE => value.ReadElement<byte>(0),
+            _ => value.ReadAsDoubles()[0]
+        };
+    }
+
     /// <summary>
     /// Read a nested APL array as key-value attribute pairs.
     /// Expected format: flat nested vector with alternating keys and values.
