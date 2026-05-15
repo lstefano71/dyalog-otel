@@ -271,10 +271,20 @@ public sealed class Pipeline : IDisposable
         return totalExported > 0 ? 1 : 2;
     }
 
+    // Windows FILETIME epoch (Jan 1, 1601) to Unix epoch (Jan 1, 1970) in 100ns ticks
+    private const long FileTimeToUnixEpochTicks = 116_444_736_000_000_000L;
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern void GetSystemTimePreciseAsFileTime(out long fileTime);
+
+    /// <summary>
+    /// High-resolution UTC timestamp in Unix nanoseconds (~100ns precision).
+    /// Uses GetSystemTimePreciseAsFileTime instead of DateTime.UtcNow (15.6ms resolution).
+    /// </summary>
     public static long GetTimestampNano()
     {
-        // DateTime.UtcNow in Unix nanoseconds
-        return (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) * 1_000_000;
+        GetSystemTimePreciseAsFileTime(out long fileTime);
+        return (fileTime - FileTimeToUnixEpochTicks) * 100;
     }
 
     private static byte[] GenerateId(int length)
