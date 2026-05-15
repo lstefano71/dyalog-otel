@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Threading.Channels;
 using Dyalog.OTel.Channels;
@@ -5,12 +6,13 @@ using Dyalog.OTel.Config;
 using Dyalog.OTel.Destinations;
 using Dyalog.OTel.Diagnostics;
 using Dyalog.OTel.Templates;
+using Open.ChannelExtensions;
 
 namespace Dyalog.OTel.Pipeline;
 
 /// <summary>
 /// A telemetry pipeline: owns three typed channels (log/span/metric),
-/// three consumer threads, and a set of destinations.
+/// batching readers (via Open.ChannelExtensions), and a set of destinations.
 /// </summary>
 public sealed class Pipeline : IDisposable
 {
@@ -18,18 +20,20 @@ public sealed class Pipeline : IDisposable
     private readonly Channel<SpanRecord> _spanChannel;
     private readonly Channel<MetricPoint> _metricChannel;
 
-    private readonly Thread _logConsumer;
-    private readonly Thread _spanConsumer;
-    private readonly Thread _metricConsumer;
+    private readonly BatchingChannelReader<LogRecord, List<LogRecord>> _logBatcher;
+    private readonly BatchingChannelReader<SpanRecord, List<SpanRecord>> _spanBatcher;
+    private readonly BatchingChannelReader<MetricPoint, List<MetricPoint>> _metricBatcher;
 
-    private readonly CancellationTokenSource _cts = new();
-    private CancellationTokenSource _wakeCts = new(); // cancelled to interrupt consumer waits
-    private readonly ManualResetEventSlim _logFlushed = new(false);
-    private readonly ManualResetEventSlim _spanFlushed = new(false);
-    private readonly ManualResetEventSlim _metricFlushed = new(false);
+    private Task? _logConsumer;
+    private Task? _spanConsumer;
+    private Task? _metricConsumer;
+
+    // Watermark counters: items attempted (success or failure), for flush synchronization
+    private long _logProcessed;
+    private long _spanProcessed;
+    private long _metricProcessed;
 
     private readonly List<IDestination> _destinations;
-    private readonly BatchConfig _batchConfig;
     public InternalMetrics Metrics { get; } = new();
     public TemplateRegistry Templates { get; } = new();
     public Dictionary<string, string> Resource { get; set; } = new();
@@ -41,30 +45,27 @@ public sealed class Pipeline : IDisposable
     public Pipeline(List<IDestination> destinations, BatchConfig batchConfig, int channelCapacity = 8192)
     {
         _destinations = destinations;
-        _batchConfig = batchConfig;
 
         var opts = new BoundedChannelOptions(channelCapacity)
         {
-            FullMode = BoundedChannelFullMode.DropNewest,
-            SingleReader = true,
-            SingleWriter = true // APL interpreter is single-threaded
+            FullMode = BoundedChannelFullMode.DropWrite,
+            SingleReader = false, // ForceBatch reads from APL thread concurrently with consumer
+            SingleWriter = true   // APL interpreter is single-threaded
         };
 
         _logChannel = Channel.CreateBounded<LogRecord>(opts);
         _spanChannel = Channel.CreateBounded<SpanRecord>(opts);
         _metricChannel = Channel.CreateBounded<MetricPoint>(opts);
 
-        _logConsumer = new Thread(() => ConsumeLoop(_logChannel.Reader, _batchConfig.LogSize, _batchConfig.LogIntervalMs, _logFlushed,
-            (batch) => { foreach (var d in _destinations) d.WriteLogs(batch); Metrics.LogExported(batch.Length); }))
-        { IsBackground = true, Name = "otel-log-consumer" };
-
-        _spanConsumer = new Thread(() => ConsumeLoop(_spanChannel.Reader, _batchConfig.SpanSize, _batchConfig.SpanIntervalMs, _spanFlushed,
-            (batch) => { foreach (var d in _destinations) d.WriteSpans(batch); Metrics.SpanExported(batch.Length); }))
-        { IsBackground = true, Name = "otel-span-consumer" };
-
-        _metricConsumer = new Thread(() => ConsumeLoop(_metricChannel.Reader, _batchConfig.MetricSize, _batchConfig.MetricIntervalMs, _metricFlushed,
-            (batch) => { WriteMetricBatch(batch); }))
-        { IsBackground = true, Name = "otel-metric-consumer" };
+        _logBatcher = _logChannel.Reader
+            .Batch(batchConfig.LogSize, singleReader: true)
+            .WithTimeout(batchConfig.LogIntervalMs);
+        _spanBatcher = _spanChannel.Reader
+            .Batch(batchConfig.SpanSize, singleReader: true)
+            .WithTimeout(batchConfig.SpanIntervalMs);
+        _metricBatcher = _metricChannel.Reader
+            .Batch(batchConfig.MetricSize, singleReader: true)
+            .WithTimeout(batchConfig.MetricIntervalMs);
     }
 
     public void Start()
@@ -72,9 +73,39 @@ public sealed class Pipeline : IDisposable
         foreach (var d in _destinations)
             d.Init();
 
-        _logConsumer.Start();
-        _spanConsumer.Start();
-        _metricConsumer.Start();
+        _logConsumer = Task.Run(async () => await _logBatcher.ReadAll(
+            (List<LogRecord> batch) =>
+            {
+                try
+                {
+                    foreach (var d in _destinations)
+                        d.WriteLogs(CollectionsMarshal.AsSpan(batch));
+                    Metrics.LogExported(batch.Count);
+                }
+                catch { Metrics.ExportError(); }
+                finally { Interlocked.Add(ref _logProcessed, batch.Count); }
+            }));
+
+        _spanConsumer = Task.Run(async () => await _spanBatcher.ReadAll(
+            (List<SpanRecord> batch) =>
+            {
+                try
+                {
+                    foreach (var d in _destinations)
+                        d.WriteSpans(CollectionsMarshal.AsSpan(batch));
+                    Metrics.SpanExported(batch.Count);
+                }
+                catch { Metrics.ExportError(); }
+                finally { Interlocked.Add(ref _spanProcessed, batch.Count); }
+            }));
+
+        _metricConsumer = Task.Run(async () => await _metricBatcher.ReadAll(
+            (List<MetricPoint> batch) =>
+            {
+                try { WriteMetricBatch(CollectionsMarshal.AsSpan(batch)); }
+                catch { Metrics.ExportError(); }
+                finally { Interlocked.Add(ref _metricProcessed, batch.Count); }
+            }));
     }
 
     // ── Hot-path enqueue methods (called from interpreter thread) ──
@@ -170,42 +201,40 @@ public sealed class Pipeline : IDisposable
         return false;
     }
 
-    private volatile TaskCompletionSource<bool>? _flushTcs;
-
     // ── Flush / Shutdown ──
 
     public void Flush()
     {
-        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        // Capture watermarks (APL is single-threaded, no new enqueues after this)
+        var snap = Metrics.GetSnapshot();
+        long logTarget = snap.LogsEnqueued;
+        long spanTarget = snap.SpansEnqueued;
+        long metricTarget = snap.MetricsEnqueued;
 
-        _logFlushed.Reset();
-        _spanFlushed.Reset();
-        _metricFlushed.Reset();
+        // Push any partial batches into the consumer pipeline
+        _logBatcher.ForceBatch();
+        _spanBatcher.ForceBatch();
+        _metricBatcher.ForceBatch();
 
-        // Publish the TCS so consumers see a flush request
-        _flushTcs = tcs;
-
-        // Keep waking consumers until all have acknowledged the flush.
-        // This handles the race where a consumer grabs a new wake token
-        // between our exchange-and-cancel.
-        var deadline = TimeSpan.FromSeconds(30);
+        // Wait until consumers have processed everything up to the watermark
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        while (sw.Elapsed < deadline)
+        SpinWait spinner = new();
+        while (sw.ElapsedMilliseconds < 30_000)
         {
-            var old = Interlocked.Exchange(ref _wakeCts, new CancellationTokenSource());
-            old.Cancel();
-            old.Dispose();
+            if (Interlocked.Read(ref _logProcessed) >= logTarget
+                && Interlocked.Read(ref _spanProcessed) >= spanTarget
+                && Interlocked.Read(ref _metricProcessed) >= metricTarget)
+                break;
 
-            bool allSet = _logFlushed.Wait(TimeSpan.FromMilliseconds(100))
-                       && _spanFlushed.Wait(TimeSpan.FromMilliseconds(100))
-                       && _metricFlushed.Wait(TimeSpan.FromMilliseconds(100));
-            if (allSet) break;
+            // Bail early if a consumer has faulted (counters will never advance)
+            if (_logConsumer?.IsFaulted == true
+                || _spanConsumer?.IsFaulted == true
+                || _metricConsumer?.IsFaulted == true)
+                break;
+
+            spinner.SpinOnce();
         }
 
-        // Clear the TCS so consumers resume normal operation
-        _flushTcs = null;
-
-        // Flush aggregated histograms
         FlushHistograms();
 
         foreach (var d in _destinations)
@@ -214,16 +243,18 @@ public sealed class Pipeline : IDisposable
 
     public void Shutdown()
     {
-        _cts.Cancel();
-        // Wake any consumers blocked in WaitToReadAsync
-        try { _wakeCts.Cancel(); } catch { }
+        // Completing the writers triggers the batchers' automatic final flush,
+        // then ReadAll processes all remaining batches and returns.
         _logChannel.Writer.TryComplete();
         _spanChannel.Writer.TryComplete();
         _metricChannel.Writer.TryComplete();
 
-        _logConsumer.Join(TimeSpan.FromSeconds(10));
-        _spanConsumer.Join(TimeSpan.FromSeconds(10));
-        _metricConsumer.Join(TimeSpan.FromSeconds(10));
+        try
+        {
+            Task.WaitAll([_logConsumer!, _spanConsumer!, _metricConsumer!],
+                TimeSpan.FromSeconds(10));
+        }
+        catch (AggregateException) { /* consumer may have faulted — destinations still need cleanup */ }
 
         foreach (var d in _destinations)
             d.Shutdown();
@@ -238,108 +269,6 @@ public sealed class Pipeline : IDisposable
         if (snapshot.ExportErrors == 0) return 0;
         long totalExported = snapshot.LogsExported + snapshot.SpansExported + snapshot.MetricsExported;
         return totalExported > 0 ? 1 : 2;
-    }
-
-    // ── Consumer loop ──
-
-    private void ConsumeLoop<T>(ChannelReader<T> reader, int maxBatchSize, int intervalMs,
-        ManualResetEventSlim flushedEvent, Action<ReadOnlySpan<T>> writeBatch)
-    {
-        var batch = new List<T>(maxBatchSize);
-        var token = _cts.Token;
-
-        try
-        {
-            while (!token.IsCancellationRequested)
-            {
-                batch.Clear();
-
-                // Check for pending flush before entering a potentially blocking wait
-                if (_flushTcs != null)
-                {
-                    DrainAndSignalFlush(reader, batch, writeBatch, flushedEvent, token);
-                    continue;
-                }
-
-                // Wait for at least one item or timeout
-                try
-                {
-                    // Pass wake token to WaitToReadAsync (flush interrupts it),
-                    // and shutdown token to Wait() — avoids per-iteration linked CTS allocation
-                    var wake = _wakeCts.Token;
-                    var waitTask = reader.WaitToReadAsync(wake).AsTask();
-                    if (waitTask.Wait(intervalMs, token))
-                    {
-                        while (batch.Count < maxBatchSize && reader.TryRead(out var item))
-                            batch.Add(item);
-                    }
-                }
-                catch (OperationCanceledException) when (!token.IsCancellationRequested) { /* wake for flush */ }
-                catch (OperationCanceledException) { break; }
-                catch (AggregateException ex) when (ex.InnerException is OperationCanceledException && !token.IsCancellationRequested) { /* wake for flush */ }
-                catch (AggregateException ex) when (ex.InnerException is OperationCanceledException) { break; }
-
-                if (batch.Count > 0)
-                {
-                    try
-                    {
-                        writeBatch(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(batch));
-                    }
-                    catch
-                    {
-                        Metrics.ExportError();
-                    }
-                }
-
-                // Check flush TCS after batch processing
-                if (_flushTcs != null)
-                {
-                    DrainAndSignalFlush(reader, batch, writeBatch, flushedEvent, token);
-                }
-            }
-
-            // Drain remaining items after cancellation/completion
-            batch.Clear();
-            while (reader.TryRead(out var remaining))
-                batch.Add(remaining);
-
-            if (batch.Count > 0)
-            {
-                try
-                {
-                    writeBatch(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(batch));
-                }
-                catch
-                {
-                    Metrics.ExportError();
-                }
-            }
-        }
-        finally
-        {
-            flushedEvent.Set();
-        }
-    }
-
-    // ── Helpers ──
-
-    private void DrainAndSignalFlush<T>(ChannelReader<T> reader, List<T> batch,
-        Action<ReadOnlySpan<T>> writeBatch, ManualResetEventSlim flushedEvent, CancellationToken token)
-    {
-        var myTcs = _flushTcs; // capture the specific TCS we're handling
-        batch.Clear();
-        while (reader.TryRead(out var extra))
-            batch.Add(extra);
-        if (batch.Count > 0)
-        {
-            try { writeBatch(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(batch)); }
-            catch { Metrics.ExportError(); }
-        }
-        flushedEvent.Set();
-        // Wait for THIS specific flush to complete — break if TCS reference changes
-        // (covers the case where Flush() clears it to null, or a new Flush() replaces it)
-        while (ReferenceEquals(_flushTcs, myTcs) && !token.IsCancellationRequested)
-            Thread.Sleep(1);
     }
 
     public static long GetTimestampNano()

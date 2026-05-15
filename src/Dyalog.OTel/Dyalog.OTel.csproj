@@ -13,8 +13,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\bridge-dwa\ModernDotnet\src\Dyalog.DWA.Managed\Dyalog.DWA.Managed.csproj" />
-    <ProjectReference Include="..\..\..\bridge-dwa\ModernDotnet\src\Dyalog.DWA.Generators\Dyalog.DWA.Generators.csproj"
-                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\..\bridge-dwa\ModernDotnet\src\Dyalog.DWA.Generators\Dyalog.DWA.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Dyalog.OTel.Tests" />
@@ -22,6 +21,7 @@
   <ItemGroup>
     <PackageReference Include="HdrHistogram" Version="2.*" />
     <PackageReference Include="LightProto" Version="*" />
+    <PackageReference Include="Open.ChannelExtensions" Version="9.3.0" />
   </ItemGroup>
   <!-- Import the DWA shim compilation target -->
   <Import Project="..\..\..\bridge-dwa\ModernDotnet\src\Dyalog.DWA.Generators\build\Dyalog.DWA.Generators.targets" />
