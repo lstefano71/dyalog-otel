@@ -1,0 +1,163 @@
+#!/usr/local/bin/dyalogscript
+⍝ Benchmark: OTLP/Protobuf end-to-end throughput against a real collector
+⍝
+⍝ Measures the hot-path cost when the destination is OTLP/Protobuf
+⍝ delivering to a running Fluent Bit (or any OTLP collector on :4318).
+⍝
+⍝ Prerequisites:
+⍝   fluent-bit -c test_otlp_fluentbit.conf   (running in another terminal)
+⍝
+⍝ Usage:  .\run_apl.ps1 bench_otlp.apls 120
+⍝
+⍝ Uses ⎕DT with code 15 (Go UnixMicro) for µs-precision timing.
+
+⎕IO←0 ⋄ ⎕ML←1
+
+dll←'##DLLPATH##'
+N←50000  ⍝ iterations per benchmark
+
+⍝ --- helpers ---
+now←{15 ⎕DT 'Z'}
+fmt←{
+    (n us_total)←⍵
+    us←us_total÷n
+    cps←⌊n×1000000÷us_total⌈1
+    (2⍕us),'µs/call   (',(⍕cps),' calls/sec)'
+}
+
+⎕←'═══════════════════════════════════════════════════'
+⎕←' OTLP/Protobuf End-to-End Benchmark'
+⎕←' Destination: http://localhost:4318 (Fluent Bit)'
+⎕←' Iterations per test: ',⍕N
+⎕←'═══════════════════════════════════════════════════'
+⎕←''
+
+⍝ --- Init (uses bench_otlp.ini → OTLP/Protobuf dest) ---
+⎕NA dll,'|pp_otel_init >PP'
+⎕NA dll,'|pp_otel_noop'
+⎕NA dll,'|pp_otel_log I4 I4 <PP <PP <PP'
+⎕NA dll,'|pp_otel_span_start I4 <PP I4 <PP <PP >PP'
+⎕NA dll,'|pp_otel_span_end I4 I4 <PP <PP'
+⎕NA dll,'|pp_otel_metric I4 <PP <PP I4 <PP <PP'
+⎕NA dll,'|pp_otel_flush I4'
+⎕NA dll,'|pp_otel_shutdown I4'
+⎕NA dll,'|pp_otel_stats I4 >PP'
+
+h←pp_otel_init 0
+⎕←'Pipeline init: ',⍕h
+⎕←''
+
+⍝ ── 1. DWA call floor ──
+t0←now ⍬
+:For i :In ⍳N
+    pp_otel_noop
+:EndFor
+t1←now ⍬
+noop_us←t1-t0
+⎕←'DWA noop (call floor):     ',fmt N noop_us
+
+⍝ ── 2. Baseline loop ──
+t0←now ⍬
+:For i :In ⍳N
+    _←i×2
+:EndFor
+t1←now ⍬
+base_us←t1-t0
+⎕←'Baseline (loop+assign):    ',fmt N base_us
+
+⍝ ── 3. Log (plain) ──
+t0←now ⍬
+:For i :In ⍳N
+    pp_otel_log 0 9 'OTLP benchmark message' '' ⍬
+:EndFor
+t1←now ⍬
+log_us←t1-t0
+⎕←'Log (plain):               ',fmt N log_us
+
+⍝ ── 4. Log (template + fillers) ──
+t0←now ⍬
+:For i :In ⍳N
+    pp_otel_log 0 9 'Request {Method} {Path} took {Duration}ms' '' ('GET' '/api/data' 42.5)
+:EndFor
+t1←now ⍬
+tpl_us←t1-t0
+⎕←'Log (template+fillers):    ',fmt N tpl_us
+
+⍝ ── 5. Log (key-value attrs) ──
+t0←now ⍬
+:For i :In ⍳N
+    pp_otel_log 0 9 'Event with attrs' '' ('user' 'alice' 'action' 'login')
+:EndFor
+t1←now ⍬
+attr_us←t1-t0
+⎕←'Log (key-value attrs):     ',fmt N attr_us
+
+⍝ ── 6. Span start+end ──
+t0←now ⍬
+:For i :In ⍳N
+    sh←pp_otel_span_start 0 'bench-op' 0 '' ⍬ 0
+    pp_otel_span_end 0 sh '' ⍬
+:EndFor
+t1←now ⍬
+span_us←t1-t0
+⎕←'Span (start+end):          ',fmt N span_us
+
+⍝ ── 7. Metric counter ──
+t0←now ⍬
+:For i :In ⍳N
+    pp_otel_metric 0 'bench.counter' (,1) 0 '' ⍬
+:EndFor
+t1←now ⍬
+met_us←t1-t0
+⎕←'Metric (counter):          ',fmt N met_us
+
+⍝ ── Flush: wait for all batches to reach Fluent Bit ──
+⎕←''
+⎕←'Flushing (delivering to collector)...'
+ft0←now ⍬
+pp_otel_flush 0
+ft1←now ⍬
+flush_ms←(ft1-ft0)÷1000
+⎕←'Flush completed in ',(1⍕flush_ms),'ms'
+
+⍝ ── Stats ──
+raw←pp_otel_stats 0 0
+stats←3 3⍴raw
+⎕←''
+⎕←'Stats (enqueued / exported / dropped):'
+⎕←'  Logs:    ',⍕stats[0;]
+⎕←'  Spans:   ',⍕stats[1;]
+⎕←'  Metrics: ',⍕stats[2;]
+drops←+/stats[;2]
+⎕←'  Total drops: ',⍕drops
+
+⍝ ── Summary ──
+⎕←''
+⎕←'─── Hot-path overhead (net of loop baseline) ───'
+net←{(⍵-base_us)÷N}
+⎕←'  DWA noop:         ',(2⍕net noop_us),'µs'
+⎕←'  Log plain:        ',(2⍕net log_us),'µs'
+⎕←'  Log template:     ',(2⍕net tpl_us),'µs'
+⎕←'  Log attrs:        ',(2⍕net attr_us),'µs'
+⎕←'  Span start+end:   ',(2⍕net span_us),'µs'
+⎕←'  Metric counter:   ',(2⍕net met_us),'µs'
+⎕←''
+⎕←'─── Library cost (net of DWA noop floor) ───'
+lib←{(⍵-noop_us)÷N}
+⎕←'  Log plain:        ',(2⍕lib log_us),'µs'
+⎕←'  Log template:     ',(2⍕lib tpl_us),'µs'
+⎕←'  Log attrs:        ',(2⍕lib attr_us),'µs'
+⎕←'  Span start+end:   ',(2⍕lib span_us),'µs'
+⎕←'  Metric counter:   ',(2⍕lib met_us),'µs'
+
+⍝ ── Throughput summary ──
+⎕←''
+total←(3×N)+N+N  ⍝ 3 log tests + span + metric = 5 × N calls
+total_us←(log_us+tpl_us+attr_us+span_us+met_us)
+⎕←'Total: ',(⍕total),' signal calls in ',(1⍕total_us÷1000),'ms'
+⎕←'Aggregate throughput: ',(⍕⌊total×1000000÷total_us⌈1),' calls/sec'
+
+pp_otel_shutdown 0
+⎕←''
+⎕←'Done.'
+⎕OFF 0

@@ -79,6 +79,18 @@ Fluent Bit's terminal will show the received data: log bodies with severity and 
 
 Uses `test_otlp_fluentbit.ini` (auto-detected) which configures an `otlp` destination with `protocol=protobuf` pointing at `localhost:4318`.
 
+## Benchmark OTLP/Protobuf throughput
+
+With Fluent Bit running (see above):
+
+```powershell
+.\run_apl.ps1 bench_otlp.apls 120
+```
+
+Sends 250,000 signal calls (logs, spans, metrics) through the full OTLP/Protobuf pipeline to the collector. Reports per-call overhead, aggregate throughput, and drop statistics.
+
+Uses `bench_otlp.ini` (auto-detected).
+
 ## Configuration
 
 Copy `otel.ini.sample` beside the DLL, into your working directory, or set the `DYALOG_OTEL_CONFIG` environment variable. See the sample for all options.
