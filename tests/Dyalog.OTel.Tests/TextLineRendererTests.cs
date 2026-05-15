@@ -33,7 +33,7 @@ public class TextLineRendererTests
         }, "CAL");
 
         string line = Assert.Single(lines);
-        Assert.Equal("2026-01-02T03:04:05Z CAL WARNING Cache miss Process ID: 42, User: alice", line);
+        Assert.Equal("2026-01-02T03:04:05.0000000Z CAL WARNING Cache miss Process ID: 42, User: alice", line);
     }
 
     [Fact]
@@ -55,8 +55,8 @@ public class TextLineRendererTests
 
         Assert.Equal(
         [
-            "2026-01-02T03:04:05Z SRV First line",
-            "2026-01-02T03:04:05Z SRV Second line"
+            "2026-01-02T03:04:05.0000000Z SRV First line",
+            "2026-01-02T03:04:05.0000000Z SRV Second line"
         ], lines);
     }
 
@@ -89,9 +89,29 @@ public class TextLineRendererTests
             BucketCounts = [1, 2, 0, 0]
         });
 
-        Assert.Contains("2026-01-02T04:00:00Z CAL Last hour for request.latency:", lines);
-        Assert.Contains("2026-01-02T04:00:00Z CAL Percentiles: p50: 20, p99: 30", lines);
+        Assert.Contains("2026-01-02T04:00:00.0000000Z CAL Last hour for request.latency:", lines);
+        Assert.Contains("2026-01-02T04:00:00.0000000Z CAL Percentiles: p50: 20, p99: 30", lines);
         Assert.Contains(lines, line => line.Contains("|"));
+    }
+
+    [Fact]
+    public void RenderLog_KeepsFixedWidthFractionalTimestamp()
+    {
+        var renderer = new TextLineRenderer(new TextDestinationOptions
+        {
+            Path = @"C:\logs\app.log"
+        });
+
+        var lines = renderer.RenderLog(new LogRecord
+        {
+            TimestampUnixNano = ToUnixNano(new DateTimeOffset(2026, 1, 2, 3, 4, 5, 7, TimeSpan.Zero)),
+            SeverityNumber = 9,
+            SeverityText = "INFO",
+            Body = "Tick",
+            Attributes = [new OTelAttribute("emitter", "CAL")]
+        }, "CAL");
+
+        Assert.Equal("2026-01-02T03:04:05.0070000Z CAL Tick", Assert.Single(lines));
     }
 
     private static long ToUnixNano(DateTimeOffset timestampUtc) =>

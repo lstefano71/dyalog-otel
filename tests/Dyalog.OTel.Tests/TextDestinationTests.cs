@@ -41,7 +41,7 @@ public class TextDestinationTests : IDisposable
         destination.Shutdown();
 
         string text = File.ReadAllText(path);
-        Assert.Contains("2026-01-02T03:04:05Z SRV Started Process ID: 2760", text);
+        Assert.Contains("2026-01-02T03:04:05.0000000Z SRV Started Process ID: 2760", text);
     }
 
     [Fact]

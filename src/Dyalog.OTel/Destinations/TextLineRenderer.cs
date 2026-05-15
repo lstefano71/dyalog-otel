@@ -169,15 +169,7 @@ internal sealed class TextLineRenderer
     }
 
     private static string FormatTimestamp(DateTimeOffset timestampUtc)
-    {
-        string raw = timestampUtc.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", CultureInfo.InvariantCulture);
-        int suffixStart = raw.Length - 2;
-        while (suffixStart >= 0 && raw[suffixStart] == '0')
-            suffixStart--;
-        if (suffixStart >= 0 && raw[suffixStart] == '.')
-            suffixStart--;
-        return raw[..(suffixStart + 1)] + "Z";
-    }
+        => timestampUtc.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", CultureInfo.InvariantCulture);
 
     private static DateTimeOffset FromUnixNano(long unixNano)
     {
