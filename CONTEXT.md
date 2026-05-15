@@ -28,6 +28,10 @@ _Avoid_: preset, context (overloaded), scope
 A configured output target that receives batched signals from a consumer thread. Examples: OTLP/protobuf endpoint, file, custom JSON+HTTP.
 _Avoid_: exporter (OTel-specific term — we may support non-OTel destinations), sink
 
+**Text destination**:
+A destination that renders raw log records and selected synthesized summaries as human-readable text into a text stream.
+_Avoid_: file destination, console fallback
+
 **Span handle**:
 An opaque integer returned by `otel_span_start`, identifying an active span. Parenting is always explicit (pass parent handle at creation) — never inferred from an implicit stack. Must be closed with `otel_span_end`.
 _Avoid_: span context, trace handle
@@ -52,6 +56,22 @@ _Avoid_: settings file, properties file
 A set of attributes describing the entity producing telemetry (service name, host, APL version, etc.). Frozen at pipeline start. Auto-detected where possible (host name, PID, APL version via DWA `Workspace` API), overridable via builder calls.
 _Avoid_: metadata, identity
 
+**Emitter**:
+A short per-signal code naming the logical producer within a resource, such as `SRV` or `CAL`.
+_Avoid_: component, resource, filename
+
+**Summary block**:
+A periodic human-readable text group synthesized by a destination from aggregated metrics rather than emitted directly by application code.
+_Avoid_: report, dashboard, log record
+
+**Text stream**:
+A concrete human-readable output file or stream selected per process; multiple emitters may write to the same text stream, and its filename need not match any emitter code.
+_Avoid_: component log, source file
+
+**Startup block**:
+A one-time human-readable text group emitted at pipeline start from known process and resource metadata.
+_Avoid_: banner, bootstrap log spam
+
 ## Relationships
 
 - A **pipeline** owns three channels (log, trace, metric), each with a consumer thread
@@ -60,8 +80,19 @@ _Avoid_: metadata, identity
 - An **attribute** bag is the variable part of a **signal**; fixed fields (severity, message, span name, etc.) are positional
 - A **template** is referenced by name during signal calls; the hot path resolves it to an immutable snapshot via dictionary lookup
 - A **span handle** is returned by span-start and consumed by span-end; parenting is explicit via a parent handle argument
+- A **resource** may contain multiple **emitters**
+- A **signal** may carry an **emitter** naming its logical producer within the **resource**
+- A **destination** may render a **signal** directly or synthesize a **summary block** from aggregated metrics
+- A **destination** may route output into one or more **text streams**
+- A **text destination** writes to a **text stream**
+- A **text destination** may emit a **startup block** and **summary blocks**
+- Multiple **emitters** may share a **text stream**
 
 ## Flagged ambiguities
 
 - "handle" in this library means a pipeline handle (integer, 0 = singleton) or a span handle (integer). In the DWA bridge context, "handle" typically refers to a database connection. These are different concepts sharing a name. Pipeline handles and span handles are also distinct — pipeline handles route signals to a pipeline; span handles identify an active span within a pipeline.
 - APL has no deterministic scope-exit mechanism (`using`, `try-finally`). Span lifecycle is inherently leaky. Scope-bound spans via `⎕SHADOW` work for single-tradfn scopes; cross-function spans require discipline. A timeout-based reaper on the background thread auto-closes long-open spans as a safety net.
+- "resource" was used to mean both pipeline identity and the short origin printed in human-readable logs — resolved: use **resource** for pipeline identity and **emitter** for the short per-signal origin code (`SRV`, `CAL`).
+- "log" can mean a raw log record or a human-readable periodic digest — resolved: use **log record** for raw emitted logs and **summary block** for synthesized periodic metric output.
+- A text filename can look like an emitter name but is only a routing artifact — resolved: use **text stream** for the per-process output target and **emitter** for the per-signal origin code.
+- "file destination" and human-readable text output are different concepts — resolved: use **file destination** for JSONL-style structured output and **text destination** for operator-facing text output.

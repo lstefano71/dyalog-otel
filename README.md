@@ -9,7 +9,7 @@ Built as a NativeAOT C# DLL using the [DWA Kit](https://github.com/user/bridge-d
 - **Logs** — plain text or Serilog-style message templates (`'Order {OrderId} placed for {Amount}'`)
 - **Traces** — explicit span start/end with parent-child nesting, log↔span correlation
 - **Metrics** — counters, gauges, histograms
-- **Destinations** — JSONL file (with time-based rotation), JSONL-over-HTTP, OTLP/Protobuf (default), OTLP/JSON, console fallback
+- **Destinations** — JSONL file (with time-based rotation), human-readable text file, JSONL-over-HTTP, OTLP/Protobuf (default), OTLP/JSON, console fallback
 - **Config** — INI file with 4-layer precedence (defaults → file → env vars → builder calls)
 - **Attribute templates** — pre-built frozen snapshots for recurring key-value sets
 
@@ -96,6 +96,46 @@ Uses `bench_otlp.ini` (auto-detected).
 Copy `otel.ini.sample` beside the DLL, into your working directory, or set the `DYALOG_OTEL_CONFIG` environment variable. See the sample for all options.
 
 Standard `OTEL_*` environment variables are also supported (`OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`, `OTEL_EXPORTER_OTLP_ENDPOINT`, etc.).
+
+### `destination.text`
+
+`destination.text` is a human-readable operator log. It is separate from `destination.file`, which remains JSONL. Raw log lines render as:
+
+```text
+{timestamp} {emitter} {severity?} {message} {promoted attributes?}
+```
+
+- `timestamp` is UTC ISO-8601 with a `Z` suffix
+- `emitter` comes from the canonical `emitter` signal attribute (usually supplied via templates)
+- `severity` is only shown for warnings, errors, and fatal logs
+- promoted attributes come from an explicit allowlist and render as `Label: value`
+- multiline raw messages are split and re-prefixed
+
+If you configure summary metrics, `destination.text` also emits periodic histogram summary blocks grouped by emitter. Summary metrics require `signals = log,metric`.
+
+Example:
+
+```ini
+[destination.text]
+path = logs/operator.log
+rotate = monthly
+signals = log,metric
+startup = true
+promote = process.pid, apl.version
+label.process.pid = Process ID
+label.apl.version = APL Version
+summary.interval = 1h
+summary.percentiles = 50,90,95,99
+summary.metric.request_latency.name = request.latency
+summary.metric.request_latency.bars = true
+summary.metric.calc_latency.name = calc.latency
+```
+
+`summary.metric.<alias>.name` declares a histogram metric to summarize. Optional per-metric overrides:
+
+- `summary.metric.<alias>.percentiles = 75,95,99`
+- `summary.metric.<alias>.bars = true|false`
+- `summary.metric.<alias>.interval = 5m|1h|1d|hourly|daily`
 
 ## License
 

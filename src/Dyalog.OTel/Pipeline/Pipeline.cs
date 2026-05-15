@@ -465,10 +465,14 @@ public sealed class Pipeline : IDisposable
     {
         // Separate histogram observations from other metrics
         var nonHistogram = new List<MetricPoint>();
+        var rawHistograms = new List<MetricPoint>();
         foreach (var point in batch)
         {
             if (point.Type == Channels.MetricType.Histogram)
+            {
                 _histogramAggregator.Record(point.Name, point.Value);
+                rawHistograms.Add(point);
+            }
             else
                 nonHistogram.Add(point);
         }
@@ -478,6 +482,16 @@ public sealed class Pipeline : IDisposable
         {
             foreach (var d in _destinations)
                 d.WriteMetrics(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(nonHistogram));
+        }
+
+        if (rawHistograms.Count > 0)
+        {
+            var rawSpan = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(rawHistograms);
+            foreach (var d in _destinations)
+            {
+                if (d is IRawHistogramObservationDestination rawHistogramDestination)
+                    rawHistogramDestination.WriteRawHistogramMetrics(rawSpan);
+            }
         }
 
         Metrics.MetricExported(batch.Length);
@@ -514,7 +528,10 @@ public sealed class Pipeline : IDisposable
         if (points.Count > 0)
         {
             foreach (var d in _destinations)
-                d.WriteMetrics(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(points));
+            {
+                if (d is not IRawHistogramObservationDestination)
+                    d.WriteMetrics(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(points));
+            }
         }
     }
 

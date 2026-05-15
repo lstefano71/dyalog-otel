@@ -15,6 +15,7 @@ internal static class DestinationFactory
             "file" => CreateFile(config),
             "http" => CreateHttp(config),
             "otlp" => CreateOtlp(config),
+            "text" => CreateText(config),
             "console" => new ConsoleDestination(),
             _ => UnknownType(config.Type)
         };
@@ -49,7 +50,7 @@ internal static class DestinationFactory
 
     private static IDestination? UnknownType(string type)
     {
-        Console.Error.WriteLine($"[dyalog-otel] WARNING: Unknown destination type '{type}'. Supported: file, http, otlp, console.");
+        Console.Error.WriteLine($"[dyalog-otel] WARNING: Unknown destination type '{type}'. Supported: file, http, otlp, text, console.");
         return null;
     }
 
@@ -84,6 +85,12 @@ internal static class DestinationFactory
             }
         }
         return new JsonlHttpDestination(url, config.Signals, headers);
+    }
+
+    private static TextDestination CreateText(DestinationConfig config)
+    {
+        var options = TextDestinationConfig.Parse(config);
+        return new TextDestination(options);
     }
 }
 

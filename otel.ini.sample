@@ -11,6 +11,24 @@ path = logs/otel.jsonl
 rotate = monthly
 signals = log,span,metric
 
+; Human-readable operator text destination.
+; Separate from destination.file (JSONL).
+; Summary metrics require signals = log,metric and use the canonical `emitter` attribute.
+; [destination.text]
+; path = logs/operator.log
+; rotate = monthly
+; signals = log,metric
+; startup = true
+; promote = process.pid, apl.version
+; label.process.pid = Process ID
+; label.apl.version = APL Version
+; summary.interval = 1h
+; summary.percentiles = 50,90,95,99
+; summary.metric.request_latency.name = request.latency
+; summary.metric.request_latency.bars = true
+; summary.metric.calc_latency.name = calc.latency
+; summary.metric.calc_latency.percentiles = 75,95,99
+
 ; HTTP destination (uncomment to enable):
 ; [destination.http]
 ; url = http://localhost:8080/ingest

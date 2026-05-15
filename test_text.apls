@@ -1,0 +1,85 @@
+#!/usr/local/bin/dyalogscript
+⍝ Smoke test / demo for destination.text
+⍝ Usage:  .\run_apl.ps1 test_text.apls
+
+⎕IO←0 ⋄ ⎕ML←1
+
+dll←'##DLLPATH##'
+
+pass←0 ⋄ fail←0
+check←{(name exp got)←⍵ ⋄ exp≡got:⊢(pass+←1)⊢⎕←'  ✓ ',name ⋄ ⊢(fail+←1)⊢⎕←'  ✗ ',name,' — exp ',(⍕exp),' got ',⍕got}
+Has←{needle←⍺ ⋄ lines←⍵ ⋄ ∨/{∨/needle⍷⍵}¨lines}
+
+_←1 ⎕NDELETE 'test-output.log'
+
+⎕←'=== dyalog-otel Text Destination Demo ==='
+
+⎕NA dll,'|pp_otel_init >PP'
+⎕NA dll,'|pp_otel_status I4 >PP'
+⎕NA dll,'|pp_otel_log I4 I4 <PP <PP <PP'
+⎕NA dll,'|pp_otel_metric I4 <PP <PP I4 <PP <PP'
+⎕NA dll,'|pp_otel_flush I4'
+⎕NA dll,'|pp_otel_shutdown I4'
+⎕NA dll,'|pp_otel_tpl_create I4 <PP <PP'
+
+⎕←'Init:'
+h←pp_otel_init 0
+_←check 'init returns 0' 0 h
+st←pp_otel_status 0 0
+_←check 'status is healthy' 0 st
+
+⎕←'Templates:'
+pp_otel_tpl_create 0 'srv' ('emitter' 'SRV')
+pp_otel_tpl_create 0 'cal' ('emitter' 'CAL')
+_←check 'template create (no error)' 1 1
+
+⎕←'Logs:'
+multiline←'Batch step 1',(⎕UCS 10),'Batch step 2'
+pp_otel_log 0 9 'Starting text destination demo' 'srv' ⍬
+pp_otel_log 0 13 'Configuration uses demo values' 'srv' ⍬
+pp_otel_log 0 9 'Calculator ready' 'cal' ('worker' 'calc-1' 'cycle' 1)
+pp_otel_log 0 9 multiline 'cal' ⍬
+_←check 'logs emitted (no error)' 1 1
+
+⎕←'Histogram metrics:'
+:For v :In 45 80 120 300 55 200
+    pp_otel_metric 0 'request.duration' (,v) 2 'cal' ⍬
+:EndFor
+_←check 'histogram metrics emitted (no error)' 1 1
+
+⎕←'Flush (raw lines only):'
+pp_otel_flush 0
+_←check 'flush (no error)' 1 1
+
+⎕←'Shutdown (emits final partial summary):'
+pp_otel_shutdown 0
+_←check 'shutdown (no error)' 1 1
+
+⎕←''
+⎕←'Text output verification:'
+:If ⎕NEXISTS 'test-output.log'
+    _←check 'text log exists' 1 1
+    rawlines←⊃⎕NGET 'test-output.log' 1
+    lines←(0<≢¨rawlines)/rawlines
+    _←check 'text log has lines' 1 (0<≢lines)
+
+    _←check 'startup block present' 1 ('OTEL Text destination started' Has lines)
+    _←check 'info line present' 1 ('SRV Starting text destination demo' Has lines)
+    _←check 'warning line present' 1 ('SRV WARNING Configuration uses demo values' Has lines)
+    _←check 'promoted attrs line present' 1 ('CAL Calculator ready Worker: calc-1, Cycle: 1' Has lines)
+    _←check 'multiline line 1 present' 1 ('CAL Batch step 1' Has lines)
+    _←check 'multiline line 2 present' 1 ('CAL Batch step 2' Has lines)
+    _←check 'summary header present' 1 ('CAL Final partial Last hour for request.duration:' Has lines)
+    _←check 'summary percentile line present' 1 ('CAL Percentiles:' Has lines)
+
+    ⎕←'  Output file: test-output.log'
+    ⎕←'  First lines:'
+    n←10⌊≢lines
+    ⎕←n↑lines
+:Else
+    _←check 'text log exists' 1 0
+:EndIf
+
+⎕←''
+⎕←'=== Results: ',(⍕pass),' passed, ',(⍕fail),' failed ==='
+⎕OFF fail>0

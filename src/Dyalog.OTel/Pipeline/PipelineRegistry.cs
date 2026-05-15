@@ -127,6 +127,8 @@ public static class PipelineRegistry
                 otlpJson.SetResource(pipeline.Resource);
             else if (dest is OtlpProtobufDestination otlpProto)
                 otlpProto.SetResource(pipeline.Resource);
+            else if (dest is TextDestination text)
+                text.SetResource(pipeline.Resource);
         }
 
         return pipeline;

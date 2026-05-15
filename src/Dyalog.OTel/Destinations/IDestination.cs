@@ -28,3 +28,12 @@ public interface IDestination : IDisposable
     /// <summary>Graceful shutdown — flush and release resources.</summary>
     void Shutdown();
 }
+
+/// <summary>
+/// Marker for destinations that need raw histogram observations in addition to
+/// the pipeline's aggregated histogram export path.
+/// </summary>
+internal interface IRawHistogramObservationDestination
+{
+    void WriteRawHistogramMetrics(ReadOnlySpan<Channels.MetricPoint> batch);
+}

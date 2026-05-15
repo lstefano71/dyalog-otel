@@ -47,4 +47,22 @@ public class DestinationFactoryTests
         Assert.Equal("console", result.Name);
         result.Dispose();
     }
+
+    [Fact]
+    public void TextType_ReturnsInstance()
+    {
+        var config = new DestinationConfig
+        {
+            Type = "text",
+            Properties = new Dictionary<string, string>
+            {
+                ["path"] = "app.log"
+            }
+        };
+
+        var result = DestinationFactory.Create(config);
+        Assert.NotNull(result);
+        Assert.Equal("text", result.Name);
+        result.Dispose();
+    }
 }
