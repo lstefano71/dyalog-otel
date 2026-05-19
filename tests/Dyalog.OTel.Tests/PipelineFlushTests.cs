@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Dyalog.OTel.Channels;
 using Dyalog.OTel.Config;
 using Dyalog.OTel.Pipeline;
@@ -153,6 +154,45 @@ public class PipelineFlushTests
     }
 
     [Fact]
+    public void Flush_UsesConfiguredTimeout()
+    {
+        var dest = new SlowLogDestination(200);
+        var pipeline = new PipelineInstance(
+            new List<Dyalog.OTel.Destinations.IDestination> { dest },
+            new BatchConfig
+            {
+                LogSize = 1,
+                LogIntervalMs = 60_000
+            },
+            flushTimeoutMs: 50);
+
+        pipeline.Start();
+        pipeline.TryEnqueueLog(new LogRecord
+        {
+            TimestampUnixNano = PipelineInstance.GetTimestampNano(),
+            SeverityNumber = 9,
+            SeverityText = "INFO",
+            Body = "slow-message"
+        });
+
+        var sw = Stopwatch.StartNew();
+        pipeline.Flush();
+        sw.Stop();
+
+        Assert.InRange(sw.ElapsedMilliseconds, 0, 150);
+        Assert.True(SpinWait.SpinUntil(() =>
+        {
+            lock (dest.Logs)
+                return dest.Logs.Count == 1;
+        }, TimeSpan.FromSeconds(1)));
+
+        lock (dest.Logs)
+            Assert.Single(dest.Logs);
+
+        pipeline.Shutdown();
+    }
+
+    [Fact]
     public void EmergencyDrain_DrainsPartialBatchesHeldByConsumers()
     {
         var dest = new TestDestination();
@@ -243,5 +283,34 @@ public class PipelineFlushTests
         }
 
         pipeline.Shutdown();
+    }
+
+    private sealed class SlowLogDestination : Dyalog.OTel.Destinations.IDestination
+    {
+        private readonly int _delayMs;
+
+        public SlowLogDestination(int delayMs)
+        {
+            _delayMs = delayMs;
+        }
+
+        public List<LogRecord> Logs { get; } = new();
+        public string Name => "slow-log";
+
+        public void Init() { }
+
+        public void WriteLogs(ReadOnlySpan<LogRecord> batch)
+        {
+            Thread.Sleep(_delayMs);
+            lock (Logs)
+                foreach (var record in batch)
+                    Logs.Add(record);
+        }
+
+        public void WriteSpans(ReadOnlySpan<SpanRecord> batch) { }
+        public void WriteMetrics(ReadOnlySpan<MetricPoint> batch) { }
+        public void Flush() { }
+        public void Shutdown() { }
+        public void Dispose() { }
     }
 }

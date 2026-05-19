@@ -116,6 +116,9 @@ public static class ConfigLoader
                 config.DefaultEmitter = emitter;
             if (pipelineSection.TryGetValue("emitter.version", out var emitterVersion))
                 config.DefaultEmitterVersion = emitterVersion;
+            if (pipelineSection.TryGetValue("flush.timeout.ms", out var flushTimeout)
+                || pipelineSection.TryGetValue("flush.timeout", out flushTimeout))
+                config.FlushTimeoutMs = ParsePositiveMillisecondsSetting(flushTimeout, "pipeline.flush.timeout.ms");
         }
 
         // [emitter.*] sections
@@ -190,5 +193,14 @@ public static class ConfigLoader
             config.Batch.SpanIntervalMs = scheduleDelay;
             config.Batch.MetricIntervalMs = scheduleDelay;
         }
+    }
+
+    internal static int ParsePositiveMillisecondsSetting(string rawValue, string settingName)
+    {
+        if (!int.TryParse(rawValue, out var value) || value < 1)
+            throw new InvalidOperationException(
+                $"Invalid {settingName} value '{rawValue}'. Expected a positive integer number of milliseconds.");
+
+        return value;
     }
 }

@@ -71,6 +71,7 @@ public class EmitterScopeTests
                 [pipeline]
                 emitter = my-app
                 emitter.version = 3.2.1
+                flush.timeout.ms = 20000
 
                 [resource]
                 service.name = test
@@ -79,6 +80,7 @@ public class EmitterScopeTests
             var config = ConfigLoader.LoadFromFile(tempFile);
             Assert.Equal("my-app", config.DefaultEmitter);
             Assert.Equal("3.2.1", config.DefaultEmitterVersion);
+            Assert.Equal(20_000, config.FlushTimeoutMs);
         }
         finally
         {
@@ -128,6 +130,25 @@ public class EmitterScopeTests
 
         // Clean up
         PipelineRegistry.Shutdown(0);
+    }
+
+    [Fact]
+    public void PipelineRegistry_ApplyConfigOverride_PreInit_PipelineFlushTimeoutBuildsSingleton()
+    {
+        PipelineRegistry.Shutdown(0);
+        try
+        {
+            int status = PipelineRegistry.ApplyConfigOverride("pipeline", "flush.timeout.ms", "20000");
+            Assert.Equal(0, status);
+
+            var pipe = PipelineRegistry.GetOrCreateSingleton();
+            Assert.NotNull(pipe);
+            Assert.Equal(20_000, pipe.FlushTimeoutMs);
+        }
+        finally
+        {
+            PipelineRegistry.Shutdown(0);
+        }
     }
 
     [Fact]
@@ -206,6 +227,28 @@ public class EmitterScopeTests
         Assert.Equal(1, status);
 
         PipelineRegistry.Shutdown(0);
+    }
+
+    [Fact]
+    public void PipelineRegistry_ApplyConfigOverrideToBuilder_PipelineFlushTimeoutBuildsPipeline()
+    {
+        int handle = PipelineRegistry.CreatePipelineBuilder();
+        try
+        {
+            int status = PipelineRegistry.ApplyConfigOverrideToBuilder(handle, "pipeline", "flush.timeout.ms", "20000");
+            Assert.Equal(0, status);
+
+            int startStatus = PipelineRegistry.StartPipeline(handle);
+            Assert.Equal(0, startStatus);
+
+            var pipe = PipelineRegistry.Resolve(handle);
+            Assert.NotNull(pipe);
+            Assert.Equal(20_000, pipe!.FlushTimeoutMs);
+        }
+        finally
+        {
+            PipelineRegistry.Shutdown(handle);
+        }
     }
 
     [Fact]

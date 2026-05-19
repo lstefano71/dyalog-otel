@@ -5,6 +5,8 @@ namespace Dyalog.OTel.Config;
 /// </summary>
 public sealed class OTelConfig
 {
+    public const int DefaultFlushTimeoutMs = 10_000;
+
     /// <summary>Resource attributes (service.name, environment, etc.).</summary>
     public Dictionary<string, string> Resource { get; set; } = new();
 
@@ -13,6 +15,9 @@ public sealed class OTelConfig
 
     /// <summary>Batch configuration per signal type.</summary>
     public BatchConfig Batch { get; set; } = new();
+
+    /// <summary>Maximum time pp_otel_flush / graceful shutdown waits for consumers to drain.</summary>
+    public int FlushTimeoutMs { get; set; } = DefaultFlushTimeoutMs;
 
     /// <summary>Default emitter name (InstrumentationScope.name). Fallback: "dyalog-otel".</summary>
     public string DefaultEmitter { get; set; } = "dyalog-otel";

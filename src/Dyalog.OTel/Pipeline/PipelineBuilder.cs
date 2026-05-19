@@ -64,7 +64,7 @@ public sealed class PipelineBuilder
         if (destinations.Count == 0)
             destinations.Add(new ConsoleDestination());
 
-        var pipeline = new Pipeline(destinations, _config.Batch);
+        var pipeline = new Pipeline(destinations, _config.Batch, _config.FlushTimeoutMs);
         var autoDetected = Resources.ResourceDetector.Detect();
         pipeline.Resource = Resources.ResourceDetector.Merge(autoDetected, _config.Resource);
         pipeline.DefaultEmitter = _config.DefaultEmitter;

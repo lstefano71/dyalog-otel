@@ -41,10 +41,12 @@ r←pp_otel_config 'resource' 'service.name' 'programmatic-test' 0
 r←pp_otel_config 'resource' 'service.version' '1.0.0' 0
 r←pp_otel_config 'resource' 'deployment.environment' 'test' 0
 
-⍝ Pipeline: default emitter for signals that pass ''
+⍝ Pipeline: default emitter for signals that pass '' + graceful flush timeout
 r←pp_otel_config 'pipeline' 'emitter' 'main-app' 0
 ⎕←'  pipeline.emitter → status: ',⍕r
 r←pp_otel_config 'pipeline' 'emitter.version' '1.0.0' 0
+r←pp_otel_config 'pipeline' 'flush.timeout.ms' '20000' 0
+⎕←'  pipeline.flush.timeout.ms → status: ',⍕r
 
 ⍝ Destination: OTLP/Protobuf to localhost collector
 r←pp_otel_config 'destination.otlp' 'endpoint' 'http://localhost:4318' 0

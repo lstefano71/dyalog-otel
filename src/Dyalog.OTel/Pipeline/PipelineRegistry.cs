@@ -243,6 +243,9 @@ public static class PipelineRegistry
                     config.DefaultEmitter = value;
                 else if (key.Equals("emitter.version", StringComparison.OrdinalIgnoreCase))
                     config.DefaultEmitterVersion = value;
+                else if (key.Equals("flush.timeout.ms", StringComparison.OrdinalIgnoreCase)
+                    || key.Equals("flush.timeout", StringComparison.OrdinalIgnoreCase))
+                    config.FlushTimeoutMs = ConfigLoader.ParsePositiveMillisecondsSetting(value, $"pipeline.{key}");
                 return;
             case "batch":
                 ApplyBatchOverride(config.Batch, key, value);
@@ -301,7 +304,7 @@ public static class PipelineRegistry
         if (destinations.Count == 0)
             destinations.Add(new ConsoleDestination());
 
-        var pipeline = new Pipeline(destinations, config.Batch);
+        var pipeline = new Pipeline(destinations, config.Batch, config.FlushTimeoutMs);
 
         // Set resource attributes
         var autoDetected = ResourceDetector.Detect();
@@ -355,12 +358,7 @@ public static class PipelineRegistry
             return ConfigOverrideKind.PreInitOnly; // resource.* is open-ended
 
         if (section.Equals("pipeline", StringComparison.OrdinalIgnoreCase))
-        {
-            return key.Equals("emitter", StringComparison.OrdinalIgnoreCase)
-                || key.Equals("emitter.version", StringComparison.OrdinalIgnoreCase)
-                ? ConfigOverrideKind.PreInitOnly
-                : ConfigOverrideKind.Unknown;
-        }
+            return IsKnownPipelineKey(key) ? ConfigOverrideKind.PreInitOnly : ConfigOverrideKind.Unknown;
 
         if (section.Equals("batch", StringComparison.OrdinalIgnoreCase))
             return IsKnownBatchKey(key) ? ConfigOverrideKind.PreInitOnly : ConfigOverrideKind.Unknown;
@@ -389,6 +387,15 @@ public static class PipelineRegistry
         return key.ToLowerInvariant() switch
         {
             "log.size" or "log.interval" or "span.size" or "span.interval" or "metric.size" or "metric.interval" => true,
+            _ => false
+        };
+    }
+
+    private static bool IsKnownPipelineKey(string key)
+    {
+        return key.ToLowerInvariant() switch
+        {
+            "emitter" or "emitter.version" or "flush.timeout" or "flush.timeout.ms" => true,
             _ => false
         };
     }

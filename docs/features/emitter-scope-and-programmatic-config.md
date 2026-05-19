@@ -73,6 +73,7 @@ Two related capabilities:
 [pipeline]
 emitter = myapp.main          ; default emitter name (used when '' is passed)
 emitter.version = 1.0.0       ; default emitter version
+flush.timeout.ms = 20000      ; pp_otel_flush / graceful shutdown drain timeout
 
 [resource]
 service.name = myapp
@@ -111,7 +112,7 @@ dll←'path/to/dyalog.otel.dll'
 ⎕NA dll,'|pp_otel_shutdown I4'
 
 pp_otel_config 0 'resource' ('service.name' 'my-apl-app')
-pp_otel_config 0 'pipeline' ('emitter' 'myapp' 'emitter.version' '1.0.0')
+pp_otel_config 0 'pipeline' ('emitter' 'myapp' 'emitter.version' '1.0.0' 'flush.timeout.ms' '20000')
 pp_otel_config 0 'destination.otlp' ('endpoint' 'http://localhost:4318' 'protocol' 'protobuf' 'signals' 'log,span,metric')
 
 (status handle)←pp_otel_init ⍬ 0

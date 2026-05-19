@@ -20,5 +20,5 @@ We unify the existing "Emitter" concept with OTel's InstrumentationScope: the em
 
 - All signal call signatures gain an `emitter` parameter (breaking change — acceptable since all call sites are in this repo).
 - OTLP destinations must group signals by emitter name before serializing (one InstrumentationScope container per distinct emitter in a batch).
-- The `[pipeline]` INI section is introduced for pipeline-level settings (default emitter, emitter.version).
+- The `[pipeline]` INI section is introduced for pipeline-level settings (default emitter, emitter.version, flush timeout).
 - Precedence layers remain: defaults → INI → env vars → builder calls (per-key merge, code wins).

@@ -33,7 +33,6 @@ public sealed class Pipeline : IDisposable
     private Task? _metricConsumer;
 
     private const int ConsumerWakeIntervalMs = 50;
-    private const int FlushTimeoutMs = 10_000;
     private long _flushEpoch;
     private int _emergencyDraining;
 
@@ -43,6 +42,7 @@ public sealed class Pipeline : IDisposable
     private readonly int _logBatchIntervalMs;
     private readonly int _spanBatchIntervalMs;
     private readonly int _metricBatchIntervalMs;
+    private readonly int _flushTimeoutMs;
 
     // Watermark counters: items attempted (success or failure), for flush synchronization
     private long _logProcessed;
@@ -70,7 +70,13 @@ public sealed class Pipeline : IDisposable
     private readonly Dictionary<int, ActiveSpan> _activeSpans = new();
     private int _nextSpanHandle = 1;
 
-    public Pipeline(List<IDestination> destinations, BatchConfig batchConfig, int channelCapacity = 8192)
+    internal int FlushTimeoutMs => _flushTimeoutMs;
+
+    public Pipeline(
+        List<IDestination> destinations,
+        BatchConfig batchConfig,
+        int flushTimeoutMs = OTelConfig.DefaultFlushTimeoutMs,
+        int channelCapacity = 8192)
     {
         _destinations = destinations;
 
@@ -95,6 +101,7 @@ public sealed class Pipeline : IDisposable
         _logBatchIntervalMs = batchConfig.LogIntervalMs;
         _spanBatchIntervalMs = batchConfig.SpanIntervalMs;
         _metricBatchIntervalMs = batchConfig.MetricIntervalMs;
+        _flushTimeoutMs = ValidateFlushTimeout(flushTimeoutMs, nameof(flushTimeoutMs));
     }
 
     public void Start()
@@ -267,7 +274,7 @@ public sealed class Pipeline : IDisposable
 
         // Wait until consumers have processed everything up to the watermark
         var sw = Stopwatch.StartNew();
-        while (sw.ElapsedMilliseconds < FlushTimeoutMs)
+        while (sw.ElapsedMilliseconds < _flushTimeoutMs)
         {
             long lp = Interlocked.Read(ref _logProcessed);
             long sp = Interlocked.Read(ref _spanProcessed);
@@ -410,6 +417,13 @@ public sealed class Pipeline : IDisposable
         return batchSize;
     }
 
+    private static int ValidateFlushTimeout(int flushTimeoutMs, string name)
+    {
+        if (flushTimeoutMs < 1)
+            throw new ArgumentOutOfRangeException(name, flushTimeoutMs, "Flush timeout must be at least 1 ms.");
+        return flushTimeoutMs;
+    }
+
     private static int GetConsumerWaitMs(int batchIntervalMs, long batchStartedAt, int batchCount)
     {
         int waitMs = ConsumerWakeIntervalMs;
@@ -436,7 +450,7 @@ public sealed class Pipeline : IDisposable
             try
             {
                 Task.WaitAll([_logConsumer, _spanConsumer, _metricConsumer],
-                    TimeSpan.FromSeconds(10));
+                    TimeSpan.FromMilliseconds(_flushTimeoutMs));
             }
             catch (AggregateException) { /* consumer may have faulted — destinations still need cleanup */ }
         }
