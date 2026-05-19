@@ -34,6 +34,8 @@ $iniPath = [System.IO.Path]::ChangeExtension($ScriptPath, '.ini')
 if (Test-Path $iniPath) {
     $env:DYALOG_OTEL_CONFIG = (Resolve-Path $iniPath).Path
     Write-Host "Using OTEL config: $($env:DYALOG_OTEL_CONFIG)"
+} else {
+    Remove-Item Env:\DYALOG_OTEL_CONFIG -ErrorAction SilentlyContinue
 }
 
 # --- launch dyascript.exe ---

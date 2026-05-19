@@ -24,6 +24,7 @@ old_dflags←2 ⎕NQ '#' 'setdflags' 64
 ⎕NA dll,'|pp_otel_config <PP <PP <PP >PP'
 ⎕NA dll,'|pp_otel_init >PP'
 ⎕NA dll,'|pp_otel_log I4 I4 <PP <PP <PP <PP'
+⎕NA dll,'|pp_otel_log_span I4 I4 <PP I4 <PP <PP <PP'
 ⎕NA dll,'|pp_otel_span_start I4 <PP I4 <PP <PP <PP >PP'
 ⎕NA dll,'|pp_otel_span_end I4 I4 <PP <PP'
 ⎕NA dll,'|pp_otel_metric I4 <PP <PP I4 <PP <PP <PP'
@@ -142,14 +143,16 @@ sh_parent←pp_otel_span_start 0 'process.order' 0 '' '' ('order.id' '9001') 0
 ⎕←'  parent span (main-app): handle ',⍕sh_parent
 
 sh_child1←pp_otel_span_start 0 'calculate.price' sh_parent 'calculator' '' ⍬ 0
+pp_otel_log_span 0 9 ('Price calculated for {ClientId}' 9001) sh_child1 'calculator' '' ⍬
 ⎕DL 0.02
 pp_otel_span_end 0 sh_child1 '' ⍬
-⎕←'  child span (calculator) completed'
+⎕←'  child span (calculator) completed, with correlated log'
 
 sh_child2←pp_otel_span_start 0 'load.customer' sh_parent 'data-loader' '' ⍬ 0
+pp_otel_log_span 0 13 'Customer record not in cache — loading from DB' sh_child2 'data-loader' '' ⍬
 ⎕DL 0.01
 pp_otel_span_end 0 sh_child2 '' ⍬
-⎕←'  child span (data-loader) completed'
+⎕←'  child span (data-loader) completed, with correlated log'
 
 ⎕DL 0.01
 pp_otel_span_end 0 sh_parent '' ('order.status' 'confirmed')
@@ -183,4 +186,5 @@ pp_otel_shutdown 0
 ⎕←'  • 4 distinct InstrumentationScope entries: main-app, calculator, data-loader, late-plugin'
 ⎕←'  • Each scope has its registered version (1.0.0, 2.3.0, 1.1.0, 0.5.0)'
 ⎕←'  • A cross-emitter trace with parent (main-app) and children (calculator, data-loader)'
+⎕←'  • 2 logs correlated with spans (traceId/spanId set) inside the cross-emitter trace'
 ⎕←'  • All signals tagged with service.name=programmatic-test'

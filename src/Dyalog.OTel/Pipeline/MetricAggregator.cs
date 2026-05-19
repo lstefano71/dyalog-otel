@@ -115,6 +115,31 @@ internal sealed class MetricAggregator
         {
             var snap = state.Snapshot(DefaultHistogramBounds);
             if (snap.Count == 0) continue;
+
+            var histogramStats = new OTelAttribute[]
+            {
+                new("histogram.count", snap.Count),
+                new("histogram.sum", snap.Sum),
+                new("histogram.min", snap.Min),
+                new("histogram.max", snap.Max),
+                new("histogram.p50", snap.P50),
+                new("histogram.p90", snap.P90),
+                new("histogram.p99", snap.P99),
+            };
+
+            // Merge series attributes with histogram stats
+            OTelAttribute[] mergedAttrs;
+            if (key.Attributes != null && key.Attributes.Length > 0)
+            {
+                mergedAttrs = new OTelAttribute[key.Attributes.Length + histogramStats.Length];
+                key.Attributes.CopyTo(mergedAttrs, 0);
+                histogramStats.CopyTo(mergedAttrs, key.Attributes.Length);
+            }
+            else
+            {
+                mergedAttrs = histogramStats;
+            }
+
             result.Add(new MetricPoint
             {
                 Name = key.Name,
@@ -123,16 +148,7 @@ internal sealed class MetricAggregator
                 TimestampUnixNano = endNano,
                 StartTimeUnixNano = startNano,
                 Emitter = key.Emitter,
-                Attributes = new[]
-                {
-                    new OTelAttribute("histogram.count", snap.Count),
-                    new OTelAttribute("histogram.sum", snap.Sum),
-                    new OTelAttribute("histogram.min", snap.Min),
-                    new OTelAttribute("histogram.max", snap.Max),
-                    new OTelAttribute("histogram.p50", snap.P50),
-                    new OTelAttribute("histogram.p90", snap.P90),
-                    new OTelAttribute("histogram.p99", snap.P99),
-                }
+                Attributes = mergedAttrs,
             });
             state.Reset();
         }
