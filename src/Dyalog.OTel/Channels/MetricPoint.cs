@@ -7,8 +7,11 @@ namespace Dyalog.OTel.Channels;
 /// </summary>
 public sealed class MetricPoint
 {
-    /// <summary>Timestamp captured on the interpreter thread (UTC).</summary>
+    /// <summary>Timestamp captured on the interpreter thread (UTC). For aggregated points, this is the interval end.</summary>
     public long TimestampUnixNano { get; init; }
+
+    /// <summary>Start of the aggregation interval (UTC). Null for raw (non-aggregated) observations.</summary>
+    public long? StartTimeUnixNano { get; init; }
 
     /// <summary>Metric instrument name.</summary>
     public required string Name { get; init; }

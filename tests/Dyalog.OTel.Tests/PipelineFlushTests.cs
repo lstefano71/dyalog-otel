@@ -143,7 +143,11 @@ public class PipelineFlushTests
         lock (dest.Spans)
             Assert.Equal(40, dest.Spans.Count);
         lock (dest.Metrics)
-            Assert.Equal(40, dest.Metrics.Count);
+        {
+            // 40 counter increments to same series → 1 aggregated point with sum of 0..39 = 780
+            Assert.Equal(1, dest.Metrics.Count);
+            Assert.Equal(780.0, dest.Metrics[0].Value);
+        }
 
         pipeline.Shutdown();
     }
@@ -190,7 +194,11 @@ public class PipelineFlushTests
         lock (dest.Logs)
             Assert.Equal(5, dest.Logs.Count);
         lock (dest.Metrics)
-            Assert.Equal(5, dest.Metrics.Count);
+        {
+            // 5 counter increments to same series → 1 aggregated point with sum of 0..4 = 10
+            Assert.Equal(1, dest.Metrics.Count);
+            Assert.Equal(10.0, dest.Metrics[0].Value);
+        }
     }
 
     [Fact]

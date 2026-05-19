@@ -140,6 +140,7 @@ public sealed class OtlpJsonDestination : IDestination, IResourceAwareDestinatio
             var attrs = ConvertAttributes(record.Attributes, record.Template);
             var dp = new OtlpNumberDataPoint
             {
+                StartTimeUnixNano = record.StartTimeUnixNano?.ToString(),
                 TimeUnixNano = record.TimestampUnixNano.ToString(),
                 AsDouble = record.Value,
                 Attributes = attrs

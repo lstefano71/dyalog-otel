@@ -144,6 +144,7 @@ public sealed class OtlpProtobufDestination : IDestination, IResourceAwareDestin
             var dp = new ProtoNumberDataPoint
             {
                 TimeUnixNano = (ulong)record.TimestampUnixNano,
+                StartTimeUnixNano = record.StartTimeUnixNano.HasValue ? (ulong)record.StartTimeUnixNano.Value : 0,
                 AsDouble = record.Value,
             };
             AddAttributes(dp.Attributes, record.Attributes, record.Template);

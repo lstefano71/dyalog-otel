@@ -12,6 +12,11 @@
 
 dll←'##DLLPATH##'
 
+⍝ Debug flag: workspace check after every line (catches corruption)
+old_dflags←2 ⎕NQ '#' 'setdflags' 64
+⎕←'dflags: 64'
+
+
 ⎕←'=== Programmatic Config + Multi-Emitter Test ==='
 ⎕←''
 

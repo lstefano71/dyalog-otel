@@ -237,6 +237,10 @@ public sealed class OtlpHistogram
 
 public sealed class OtlpNumberDataPoint
 {
+    [JsonPropertyName("startTimeUnixNano")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public string? StartTimeUnixNano { get; set; }
+
     [JsonPropertyName("timeUnixNano")]
     public string TimeUnixNano { get; set; } = "0";
 

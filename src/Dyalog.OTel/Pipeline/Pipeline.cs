@@ -284,7 +284,7 @@ public sealed class Pipeline : IDisposable
             Thread.Sleep(1);
         }
 
-        FlushHistograms();
+        FlushAggregatedMetrics();
 
         foreach (var d in _destinations)
             d.Flush();
@@ -515,7 +515,6 @@ public sealed class Pipeline : IDisposable
         while (_metricChannel.Reader.TryRead(out var metric))
             metrics.Add(metric);
         metrics.AddRange(_pendingMetricBatch.Drain());
-        FlushHistograms(); // flush any accumulated histogram buckets
         if (metrics.Count > 0)
         {
             try
@@ -523,6 +522,11 @@ public sealed class Pipeline : IDisposable
                 WriteMetricBatch(CollectionsMarshal.AsSpan(metrics));
             }
             catch { /* best-effort */ }
+        }
+        else
+        {
+            // Flush any remaining aggregated state even if no new metrics arrived
+            FlushAggregatedMetrics();
         }
 
         // Also drain any already-batched items waiting in batch channels
@@ -610,31 +614,20 @@ public sealed class Pipeline : IDisposable
         return merged.Select(kv => new OTelAttribute(kv.Key, kv.Value)).ToArray();
     }
 
-    private readonly HistogramAggregator _histogramAggregator = new();
+    private readonly MetricAggregator _metricAggregator = new();
 
     private void WriteMetricBatch(ReadOnlySpan<MetricPoint> batch)
     {
-        // Separate histogram observations from other metrics
-        var nonHistogram = new List<MetricPoint>();
+        // Feed all observations into the aggregator
         var rawHistograms = new List<MetricPoint>();
         foreach (var point in batch)
         {
+            _metricAggregator.Record(point);
             if (point.Type == Channels.MetricType.Histogram)
-            {
-                _histogramAggregator.Record(point.Name, point.Value);
                 rawHistograms.Add(point);
-            }
-            else
-                nonHistogram.Add(point);
         }
 
-        // Write non-histogram metrics directly
-        if (nonHistogram.Count > 0)
-        {
-            foreach (var d in _destinations)
-                d.WriteMetrics(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(nonHistogram));
-        }
-
+        // Raw histogram observations for destinations that opt in
         if (rawHistograms.Count > 0)
         {
             var rawSpan = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(rawHistograms);
@@ -643,48 +636,24 @@ public sealed class Pipeline : IDisposable
                 if (d is IRawHistogramObservationDestination rawHistogramDestination)
                     rawHistogramDestination.WriteRawHistogramMetrics(rawSpan);
             }
-
-            FlushHistograms();
         }
+
+        // Snapshot aggregated state and export
+        FlushAggregatedMetrics();
 
         Metrics.MetricExported(batch.Length);
     }
 
-    private void FlushHistograms()
+    private void FlushAggregatedMetrics()
     {
-        var snapshots = _histogramAggregator.SnapshotAndReset();
-        if (snapshots.Count == 0) return;
+        var aggregated = _metricAggregator.SnapshotAndReset();
+        if (aggregated.Count == 0) return;
 
-        var points = new List<MetricPoint>();
-        foreach (var (name, snap) in snapshots)
+        var span = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(aggregated);
+        foreach (var d in _destinations)
         {
-            if (snap.Count == 0) continue;
-            points.Add(new MetricPoint
-            {
-                TimestampUnixNano = GetTimestampNano(),
-                Name = name,
-                Value = snap.Sum,
-                Type = Channels.MetricType.Histogram,
-                Attributes = new[]
-                {
-                    new OTelAttribute("histogram.count", snap.Count),
-                    new OTelAttribute("histogram.sum", snap.Sum),
-                    new OTelAttribute("histogram.min", snap.Min),
-                    new OTelAttribute("histogram.max", snap.Max),
-                    new OTelAttribute("histogram.p50", snap.P50),
-                    new OTelAttribute("histogram.p90", snap.P90),
-                    new OTelAttribute("histogram.p99", snap.P99),
-                }
-            });
-        }
-
-        if (points.Count > 0)
-        {
-            foreach (var d in _destinations)
-            {
-                if (d is not IRawHistogramObservationDestination)
-                    d.WriteMetrics(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(points));
-            }
+            if (d is not IRawHistogramObservationDestination)
+                d.WriteMetrics(span);
         }
     }
 
