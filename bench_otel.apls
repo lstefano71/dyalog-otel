@@ -76,7 +76,7 @@ log_us←t1-t0
 ⍝ ── 4. Log with message template + fillers ──
 t0←now ⍬
 :For i :In ⍳N
-    pp_otel_log 0 9 'Order {OrderId} total {Amount}' '' '' (42 99.5)
+    pp_otel_log 0 9 ('Order {OrderId} total {Amount}' 42 99.5) '' '' ⍬
 :EndFor
 t1←now ⍬
 tpl_us←t1-t0

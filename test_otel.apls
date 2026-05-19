@@ -47,7 +47,7 @@ _←check 'log raw placeholder (no error)' 1 1
 
 ⍝ --- Log with message template ---
 ⎕←'Log with template:'
-pp_otel_log 0 9 'Order {OrderId} placed for {Amount}' '' '' (42 99.5)
+pp_otel_log 0 9 ('Order {OrderId} placed for {Amount}' 42 99.5) '' '' ⍬
 _←check 'log template (no error)' 1 1
 
 ⍝ --- Log with key-value attributes ---

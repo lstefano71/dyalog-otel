@@ -23,9 +23,9 @@ h←pp_otel_init 0
 ⎕NA dll,'|pp_otel_log I4 I4 <PP <PP <PP <PP'
 pp_otel_log 0 9  'Hello from Dyalog APL (info)'        '' '' ⍬
 pp_otel_log 0 13 'Caution: high latency detected'      '' '' ⍬
-pp_otel_log 0 17 'Error processing request {ReqId}'    '' '' (42)
-pp_otel_log 0 5  'Debug: cache hit ratio {Ratio}'      '' '' (0.95)
-pp_otel_log 0 9  'Order {OrderId} placed for {Amount}' '' '' (1001 59.99)
+pp_otel_log 0 17 ('Error processing request {ReqId}' 42)    '' '' ⍬
+pp_otel_log 0 5  ('Debug: cache hit ratio {Ratio}' 0.95)      '' '' ⍬
+pp_otel_log 0 9  ('Order {OrderId} placed for {Amount}' 1001 59.99) '' '' ⍬
 ⎕←'  ✓ 5 logs sent'
 
 ⍝ --- Send spans ---

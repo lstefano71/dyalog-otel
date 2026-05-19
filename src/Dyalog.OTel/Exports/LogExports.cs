@@ -14,8 +14,9 @@ public static class LogExports
     /// <summary>
     /// pp_otel_log pipeline severity message emitter templateName attrs
     ///
-    /// If message contains {Placeholders}, attrs are treated as positional fillers.
-    /// If message is plain text, attrs are key-value pairs.
+    /// If message is a nested vector, element 0 is the template with {Placeholders}
+    /// and elements 1..N are positional filler values. attrs is then key-value pairs.
+    /// If message is a flat string, it is the literal body. attrs is key-value pairs.
     /// emitter: scope name (empty string = pipeline default).
     /// templateName can be empty string for no template.
     /// </summary>
@@ -26,41 +27,46 @@ public static class LogExports
         if (pipe == null) return;
 
         long timestamp = Pipeline.Pipeline.GetTimestampNano();
-        string body = msg.HasValue ? msg.ReadString() : "";
         string emitterName = ExportHelpers.ReadOptionalString(emitter);
         string tplName = ExportHelpers.ReadOptionalString(templateName);
-        int attrCount = attrs.HasValue ? attrs.Bound() : 0;
 
         // Resolve template snapshot
         TemplateSnapshot? snapshot = null;
         if (!string.IsNullOrEmpty(tplName))
             snapshot = pipe.Templates.TryGet(tplName);
 
-        // Parse message template and extract attributes from fillers
-        OTelAttribute[]? attributes = null;
+        OTelAttribute[]? fillerAttributes = null;
+        OTelAttribute[]? kvAttributes = null;
         MessageTemplate? parsed = null;
-        if (attrCount > 0)
+        string body;
+
+        if (msg.IsNested())
         {
+            // Bundled template mode: element 0 = template string, elements 1..N = fillers
+            body = msg.ReadString(0);
             parsed = TemplateCache.Instance.GetOrParse(body);
-            if (parsed.HasPlaceholders)
-            {
-                // Positional fillers mode: attrs contains values, template has names
-                attributes = ExportHelpers.ReadFillers(attrs, parsed.PlaceholderNames);
-            }
-            else if (attrs.IsNested())
-            {
-                // Key-value pairs mode
-                attributes = ExportHelpers.ReadAttributes(attrs);
-            }
+            if (parsed.HasPlaceholders && msg.Bound() > 1)
+                fillerAttributes = ExportHelpers.ReadFillersFromMessage(msg, parsed.PlaceholderNames);
         }
+        else
+        {
+            body = msg.HasValue ? msg.ReadString() : "";
+        }
+
+        // attrs is always key-value pairs
+        if (attrs.HasValue && attrs.Bound() >= 2 && attrs.IsNested())
+            kvAttributes = ExportHelpers.ReadAttributes(attrs);
+
+        // Merge filler attributes and key-value attributes (fillers take precedence)
+        OTelAttribute[]? attributes = MergeAttributes(fillerAttributes, kvAttributes);
 
         var record = new LogRecord
         {
             TimestampUnixNano = timestamp,
             SeverityNumber = severity,
             SeverityText = SeverityToText(severity),
-            Body = parsed?.HasPlaceholders == true && attributes != null
-                ? parsed.Render(attributes)
+            Body = parsed?.HasPlaceholders == true && fillerAttributes != null
+                ? parsed.Render(fillerAttributes)
                 : body,
             Emitter = emitterName,
             Template = snapshot,
@@ -74,6 +80,7 @@ public static class LogExports
     /// pp_otel_log_span pipeline severity message spanHandle emitter templateName attrs
     ///
     /// Like pp_otel_log but correlates with an active span (log↔span correlation).
+    /// Same bundled template rules as pp_otel_log.
     /// </summary>
     [DwaExport("pp_otel_log_span")]
     public static void LogWithSpan(int pipeline, int severity, Localp msg, int spanHandle, Localp emitter, Localp templateName, Localp attrs)
@@ -82,25 +89,34 @@ public static class LogExports
         if (pipe == null) return;
 
         long timestamp = Pipeline.Pipeline.GetTimestampNano();
-        string body = msg.HasValue ? msg.ReadString() : "";
         string emitterName = ExportHelpers.ReadOptionalString(emitter);
         string tplName = ExportHelpers.ReadOptionalString(templateName);
-        int attrCount = attrs.HasValue ? attrs.Bound() : 0;
 
         TemplateSnapshot? snapshot = null;
         if (!string.IsNullOrEmpty(tplName))
             snapshot = pipe.Templates.TryGet(tplName);
 
-        OTelAttribute[]? attributes = null;
+        OTelAttribute[]? fillerAttributes = null;
+        OTelAttribute[]? kvAttributes = null;
         MessageTemplate? parsed = null;
-        if (attrCount > 0)
+        string body;
+
+        if (msg.IsNested())
         {
+            body = msg.ReadString(0);
             parsed = TemplateCache.Instance.GetOrParse(body);
-            if (parsed.HasPlaceholders)
-                attributes = ExportHelpers.ReadFillers(attrs, parsed.PlaceholderNames);
-            else if (attrs.IsNested())
-                attributes = ExportHelpers.ReadAttributes(attrs);
+            if (parsed.HasPlaceholders && msg.Bound() > 1)
+                fillerAttributes = ExportHelpers.ReadFillersFromMessage(msg, parsed.PlaceholderNames);
         }
+        else
+        {
+            body = msg.HasValue ? msg.ReadString() : "";
+        }
+
+        if (attrs.HasValue && attrs.Bound() >= 2 && attrs.IsNested())
+            kvAttributes = ExportHelpers.ReadAttributes(attrs);
+
+        OTelAttribute[]? attributes = MergeAttributes(fillerAttributes, kvAttributes);
 
         // Resolve span context for correlation
         byte[]? traceId = null, spanId = null;
@@ -119,8 +135,8 @@ public static class LogExports
             TimestampUnixNano = timestamp,
             SeverityNumber = severity,
             SeverityText = SeverityToText(severity),
-            Body = parsed?.HasPlaceholders == true && attributes != null
-                ? parsed.Render(attributes)
+            Body = parsed?.HasPlaceholders == true && fillerAttributes != null
+                ? parsed.Render(fillerAttributes)
                 : body,
             TraceId = traceId,
             SpanId = spanId,
@@ -141,4 +157,25 @@ public static class LogExports
         <= 20 => "ERROR",
         _ => "FATAL"
     };
+
+    /// <summary>
+    /// Merge filler-derived attributes with key-value attributes.
+    /// Filler attributes take precedence on name collision.
+    /// </summary>
+    private static OTelAttribute[]? MergeAttributes(OTelAttribute[]? fillers, OTelAttribute[]? kvAttrs)
+    {
+        if (fillers == null && kvAttrs == null) return null;
+        if (fillers == null) return kvAttrs;
+        if (kvAttrs == null) return fillers;
+
+        // Fillers take precedence: filter out kv attrs whose key matches a filler name
+        var fillerKeys = new HashSet<string>(fillers.Select(a => a.Key), StringComparer.Ordinal);
+        var extra = kvAttrs.Where(a => !fillerKeys.Contains(a.Key)).ToArray();
+        if (extra.Length == 0) return fillers;
+
+        var merged = new OTelAttribute[fillers.Length + extra.Length];
+        fillers.CopyTo(merged, 0);
+        extra.CopyTo(merged, fillers.Length);
+        return merged;
+    }
 }

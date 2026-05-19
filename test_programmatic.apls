@@ -81,7 +81,7 @@ r←pp_otel_config 'resource' 'service.name' 'too-late' 0
 ⍝ --- Emitter 1: 'main-app' (default, pass '') ---
 ⎕←'=== Emitter: main-app (default) ==='
 pp_otel_log 0 9 'Application started successfully' '' '' ⍬
-pp_otel_log 0 9 'Processing request {Method} {Path}' '' '' ('GET' '/api/health')
+pp_otel_log 0 9 ('Processing request {Method} {Path}' 'GET' '/api/health') '' '' ⍬
 ⎕←'  2 logs sent'
 
 sh_main←pp_otel_span_start 0 'http.request' 0 '' '' ('http.method' 'GET' 'http.route' '/api/health') 0
@@ -95,7 +95,7 @@ pp_otel_metric 0 'http.requests.total' (,1) 0 '' '' ⍬
 
 ⍝ --- Emitter 2: 'calculator' (registered v2.3.0) ---
 ⎕←'=== Emitter: calculator (v2.3.0) ==='
-pp_otel_log 0 9 'Calculating portfolio value for {ClientId}' 'calculator' '' (42)
+pp_otel_log 0 9 ('Calculating portfolio value for {ClientId}' 42) 'calculator' '' ⍬
 pp_otel_log 0 13 'High complexity detected — switching to iterative solver' 'calculator' '' ⍬
 ⎕←'  2 logs sent'
 
@@ -111,8 +111,8 @@ pp_otel_metric 0 'calculator.latency_ms' (,50.2) 1 'calculator' '' ⍬
 
 ⍝ --- Emitter 3: 'data-loader' (registered v1.1.0) ---
 ⎕←'=== Emitter: data-loader (v1.1.0) ==='
-pp_otel_log 0 9 'Loading market data for {Exchange}' 'data-loader' '' (,⊂'NYSE')
-pp_otel_log 0 9 'Loaded {Count} instruments in {Duration}ms' 'data-loader' '' (1500 230)
+pp_otel_log 0 9 ('Loading market data for {Exchange}' 'NYSE') 'data-loader' '' ⍬
+pp_otel_log 0 9 ('Loaded {Count} instruments in {Duration}ms' 1500 230) 'data-loader' '' ⍬
 ⎕←'  2 logs sent'
 
 sh_load←pp_otel_span_start 0 'data.load' 0 'data-loader' '' ('exchange' 'NYSE') 0

@@ -96,6 +96,25 @@ internal static class ExportHelpers
     }
 
     /// <summary>
+    /// Read positional fillers from a nested message vector (elements 1..N).
+    /// Element 0 is the template string; elements 1+ are the filler values.
+    /// </summary>
+    public static OTelAttribute[] ReadFillersFromMessage(Localp msg, string[] placeholderNames)
+    {
+        int available = msg.Bound() - 1; // skip element 0 (the template)
+        int count = Math.Min(available, placeholderNames.Length);
+        if (count <= 0) return [];
+
+        var result = new OTelAttribute[count];
+        for (int i = 0; i < count; i++)
+        {
+            object value = ReadValue(msg, i + 1); // offset by 1 to skip template
+            result[i] = new OTelAttribute(placeholderNames[i], value);
+        }
+        return result;
+    }
+
+    /// <summary>
     /// Read a single value from a nested element. Dispatches by APL type.
     /// </summary>
     private static object ReadValue(Localp lp, int index)

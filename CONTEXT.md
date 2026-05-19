@@ -81,7 +81,7 @@ A span opened in one function and closed in another. Requires explicit handle pa
 _Avoid_: long-lived span
 
 **Message template**:
-A log message string containing `{Placeholder}` tokens that are bound to positional filler values. Produces both a human-readable rendered string and structured named attributes. Parsed once and cached implicitly by the template string.
+A log message string containing `{Placeholder}` tokens that are bound to positional filler values bundled alongside it as a nested APL vector. The first element is the template string; subsequent elements are filler values matched by position to placeholder names. Produces both a human-readable rendered body and structured named attributes. Parsed once and cached by template string. Template semantics only activate when the message argument is nested; a flat string is always literal text.
 _Avoid_: format string (no positional `{0}` numbering — names are semantic), log template
 
 **Config file**:
