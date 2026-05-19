@@ -38,14 +38,14 @@ pp_otel_log 0 9  'Order {OrderId} placed for {Amount}' '' (1001 59.99)
 sh1←pp_otel_span_start 0 'http.request' 0 '' ⍬ 0
 ⎕←'  span 1 handle: ',⍕sh1
 
-⍝ Span 2: child (not using parenting API here — just another span)
-sh2←pp_otel_span_start 0 'db.query' 0 '' ⍬ 0
+⍝ Span 2: child of http.request
+sh2←pp_otel_span_start 0 'db.query' sh1 '' ⍬ 0
 ⎕DL 0.05   ⍝ simulate 50ms work
 pp_otel_span_end 0 sh2 '' ⍬
 ⎕←'  span 2 (db.query) ended'
 
-⍝ Span 3: another child
-sh3←pp_otel_span_start 0 'cache.lookup' 0 '' ⍬ 0
+⍝ Span 3: another child of http.request
+sh3←pp_otel_span_start 0 'cache.lookup' sh1 '' ⍬ 0
 ⎕DL 0.02   ⍝ simulate 20ms work
 pp_otel_span_end 0 sh3 '' ⍬
 ⎕←'  span 3 (cache.lookup) ended'
@@ -64,6 +64,8 @@ pp_otel_metric 0 'http.requests.total'    (,1)    0 '' ⍬    ⍝ counter again 
 pp_otel_metric 0 'system.cpu.utilization' (,0.73) 1 '' ⍬    ⍝ gauge
 pp_otel_metric 0 'http.request.duration'  (,0.42) 2 '' ⍬    ⍝ histogram
 ⎕←'  ✓ 4 metrics sent'
+
+⍝ { _←⎕DL 0.05 ⋄ pp_otel_metric 0 'system.cpu.utilization' (,0.33+(⍵*0.5)÷40) 1 '' ⍬}¨⍳100
 
 ⍝ --- Flush to push everything to Fluent Bit ---
 ⎕←''
