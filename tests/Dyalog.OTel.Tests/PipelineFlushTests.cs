@@ -147,4 +147,93 @@ public class PipelineFlushTests
 
         pipeline.Shutdown();
     }
+
+    [Fact]
+    public void EmergencyDrain_DrainsPartialBatchesHeldByConsumers()
+    {
+        var dest = new TestDestination();
+        var pipeline = new PipelineInstance(
+            new List<Dyalog.OTel.Destinations.IDestination> { dest },
+            new BatchConfig
+            {
+                LogSize = 10_000,
+                LogIntervalMs = 60_000,
+                SpanSize = 10_000,
+                SpanIntervalMs = 60_000,
+                MetricSize = 10_000,
+                MetricIntervalMs = 60_000
+            });
+
+        pipeline.Start();
+
+        for (int i = 0; i < 5; i++)
+        {
+            pipeline.TryEnqueueLog(new LogRecord
+            {
+                TimestampUnixNano = PipelineInstance.GetTimestampNano(),
+                SeverityNumber = 9,
+                SeverityText = "INFO",
+                Body = $"message {i}"
+            });
+            pipeline.TryEnqueueMetric(new MetricPoint
+            {
+                TimestampUnixNano = PipelineInstance.GetTimestampNano(),
+                Name = "test.counter",
+                Value = i,
+                Type = MetricType.Counter
+            });
+        }
+
+        Thread.Sleep(100);
+        pipeline.EmergencyDrain();
+
+        lock (dest.Logs)
+            Assert.Equal(5, dest.Logs.Count);
+        lock (dest.Metrics)
+            Assert.Equal(5, dest.Metrics.Count);
+    }
+
+    [Fact]
+    public void MetricInterval_ExportsHistogramSnapshots()
+    {
+        var dest = new TestDestination();
+        var pipeline = new PipelineInstance(
+            new List<Dyalog.OTel.Destinations.IDestination> { dest },
+            new BatchConfig
+            {
+                MetricSize = 10_000,
+                MetricIntervalMs = 50
+            });
+
+        pipeline.Start();
+
+        pipeline.TryEnqueueMetric(new MetricPoint
+        {
+            TimestampUnixNano = PipelineInstance.GetTimestampNano(),
+            Name = "http.request.duration",
+            Value = 0.42,
+            Type = MetricType.Histogram
+        });
+
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (DateTime.UtcNow < deadline)
+        {
+            lock (dest.Metrics)
+            {
+                if (dest.Metrics.Count > 0)
+                    break;
+            }
+            Thread.Sleep(10);
+        }
+
+        lock (dest.Metrics)
+        {
+            var histogram = Assert.Single(dest.Metrics);
+            Assert.Equal("http.request.duration", histogram.Name);
+            Assert.Equal(MetricType.Histogram, histogram.Type);
+            Assert.Contains(histogram.Attributes!, attr => attr.Key == "histogram.count" && Convert.ToInt64(attr.Value) == 1);
+        }
+
+        pipeline.Shutdown();
+    }
 }

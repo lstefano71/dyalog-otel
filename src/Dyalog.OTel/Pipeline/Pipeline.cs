@@ -24,6 +24,10 @@ public sealed class Pipeline : IDisposable
     private readonly Channel<List<SpanRecord>> _spanBatches;
     private readonly Channel<List<MetricPoint>> _metricBatches;
 
+    private readonly PendingBatch<LogRecord> _pendingLogBatch = new();
+    private readonly PendingBatch<SpanRecord> _pendingSpanBatch = new();
+    private readonly PendingBatch<MetricPoint> _pendingMetricBatch = new();
+
     private Task? _logConsumer;
     private Task? _spanConsumer;
     private Task? _metricConsumer;
@@ -31,6 +35,7 @@ public sealed class Pipeline : IDisposable
     private const int ConsumerWakeIntervalMs = 50;
     private const int FlushTimeoutMs = 10_000;
     private long _flushEpoch;
+    private int _emergencyDraining;
 
     private readonly int _logBatchSize;
     private readonly int _spanBatchSize;
@@ -101,7 +106,8 @@ public sealed class Pipeline : IDisposable
             _logChannel.Reader,
             _logBatches.Writer,
             _logBatchSize,
-            _logBatchIntervalMs));
+            _logBatchIntervalMs,
+            _pendingLogBatch));
         var logExporter = Task.Run(() => ExportBatches(_logBatches.Reader,
             (List<LogRecord> batch) =>
             {
@@ -120,7 +126,8 @@ public sealed class Pipeline : IDisposable
             _spanChannel.Reader,
             _spanBatches.Writer,
             _spanBatchSize,
-            _spanBatchIntervalMs));
+            _spanBatchIntervalMs,
+            _pendingSpanBatch));
         var spanExporter = Task.Run(() => ExportBatches(_spanBatches.Reader,
             (List<SpanRecord> batch) =>
             {
@@ -139,7 +146,8 @@ public sealed class Pipeline : IDisposable
             _metricChannel.Reader,
             _metricBatches.Writer,
             _metricBatchSize,
-            _metricBatchIntervalMs));
+            _metricBatchIntervalMs,
+            _pendingMetricBatch));
         var metricExporter = Task.Run(() => ExportBatches(_metricBatches.Reader,
             (List<MetricPoint> batch) =>
             {
@@ -293,9 +301,11 @@ public sealed class Pipeline : IDisposable
         ChannelReader<T> reader,
         ChannelWriter<List<T>> writer,
         int batchSize,
-        int batchIntervalMs)
+        int batchIntervalMs,
+        PendingBatch<T> pending)
     {
         var batch = new List<T>(batchSize);
+        pending.SetCurrent(batch);
         long batchStartedAt = 0;
         long seenFlushEpoch = Interlocked.Read(ref _flushEpoch);
 
@@ -303,11 +313,14 @@ public sealed class Pipeline : IDisposable
         {
             while (true)
             {
-                while (batch.Count < batchSize && reader.TryRead(out var item))
+                while (Volatile.Read(ref _emergencyDraining) == 0 && batch.Count < batchSize && reader.TryRead(out var item))
                 {
-                    if (batch.Count == 0)
-                        batchStartedAt = Stopwatch.GetTimestamp();
-                    batch.Add(item);
+                    lock (pending.SyncRoot)
+                    {
+                        if (batch.Count == 0)
+                            batchStartedAt = Stopwatch.GetTimestamp();
+                        batch.Add(item);
+                    }
                 }
 
                 long currentFlushEpoch = Interlocked.Read(ref _flushEpoch);
@@ -319,7 +332,11 @@ public sealed class Pipeline : IDisposable
 
                 if (batch.Count >= batchSize || (batch.Count > 0 && (flushRequested || intervalElapsed || completed)))
                 {
-                    EmitBatch(writer, ref batch, batchSize);
+                    lock (pending.SyncRoot)
+                    {
+                        EmitBatch(writer, ref batch, batchSize);
+                        pending.SetCurrent(batch);
+                    }
                     batchStartedAt = 0;
 
                     if (flushRequested)
@@ -345,7 +362,11 @@ public sealed class Pipeline : IDisposable
                 {
                     if (!await reader.WaitToReadAsync(wake.Token).ConfigureAwait(false))
                     {
-                        EmitBatch(writer, ref batch, batchSize);
+                        lock (pending.SyncRoot)
+                        {
+                            EmitBatch(writer, ref batch, batchSize);
+                            pending.SetCurrent(batch);
+                        }
                         writer.TryComplete();
                         return;
                     }
@@ -431,15 +452,14 @@ public sealed class Pipeline : IDisposable
     /// </summary>
     public void EmergencyDrain()
     {
-        // Complete writers to prevent new enqueues
-        _logChannel.Writer.TryComplete();
-        _spanChannel.Writer.TryComplete();
-        _metricChannel.Writer.TryComplete();
+        // Stop batchers from pulling more items into private in-progress batches.
+        Volatile.Write(ref _emergencyDraining, 1);
 
         // Drain logs
         var logs = new List<LogRecord>();
         while (_logChannel.Reader.TryRead(out var log))
             logs.Add(log);
+        logs.AddRange(_pendingLogBatch.Drain());
         if (logs.Count > 0)
         {
             try
@@ -454,6 +474,7 @@ public sealed class Pipeline : IDisposable
         var spans = new List<SpanRecord>();
         while (_spanChannel.Reader.TryRead(out var span))
             spans.Add(span);
+        spans.AddRange(_pendingSpanBatch.Drain());
         if (spans.Count > 0)
         {
             try
@@ -468,13 +489,13 @@ public sealed class Pipeline : IDisposable
         var metrics = new List<MetricPoint>();
         while (_metricChannel.Reader.TryRead(out var metric))
             metrics.Add(metric);
+        metrics.AddRange(_pendingMetricBatch.Drain());
         FlushHistograms(); // flush any accumulated histogram buckets
         if (metrics.Count > 0)
         {
             try
             {
-                foreach (var d in _destinations)
-                    d.WriteMetrics(CollectionsMarshal.AsSpan(metrics));
+                WriteMetricBatch(CollectionsMarshal.AsSpan(metrics));
             }
             catch { /* best-effort */ }
         }
@@ -492,9 +513,13 @@ public sealed class Pipeline : IDisposable
         }
         while (_metricBatches.Reader.TryRead(out var metricBatch))
         {
-            try { foreach (var d in _destinations) d.WriteMetrics(CollectionsMarshal.AsSpan(metricBatch)); }
+            try { WriteMetricBatch(CollectionsMarshal.AsSpan(metricBatch)); }
             catch { /* best-effort */ }
         }
+
+        _logChannel.Writer.TryComplete();
+        _spanChannel.Writer.TryComplete();
+        _metricChannel.Writer.TryComplete();
 
         // Flush destinations (HTTP clients send remaining data)
         try
@@ -593,6 +618,8 @@ public sealed class Pipeline : IDisposable
                 if (d is IRawHistogramObservationDestination rawHistogramDestination)
                     rawHistogramDestination.WriteRawHistogramMetrics(rawSpan);
             }
+
+            FlushHistograms();
         }
 
         Metrics.MetricExported(batch.Length);
@@ -646,5 +673,30 @@ public sealed class Pipeline : IDisposable
         public long StartTimeUnixNano { get; init; }
         public OTelAttribute[]? StartAttributes { get; init; }
         public Templates.TemplateSnapshot? StartTemplate { get; init; }
+    }
+
+    private sealed class PendingBatch<T>
+    {
+        private List<T>? _current;
+
+        public object SyncRoot { get; } = new();
+
+        public void SetCurrent(List<T> current)
+        {
+            _current = current;
+        }
+
+        public List<T> Drain()
+        {
+            lock (SyncRoot)
+            {
+                if (_current == null || _current.Count == 0)
+                    return new List<T>();
+
+                var drained = new List<T>(_current);
+                _current.Clear();
+                return drained;
+            }
+        }
     }
 }

@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Dyalog.OTel.Config;
 using Dyalog.OTel.Destinations;
 using Dyalog.OTel.Resources;
@@ -26,6 +28,7 @@ public static class PipelineRegistry
     static PipelineRegistry()
     {
         AppDomain.CurrentDomain.ProcessExit += (_, _) => ShutdownAll();
+        RegisterNativeAtexit();
     }
 
     /// <summary>
@@ -311,4 +314,28 @@ public static class PipelineRegistry
     /// Check whether ProcessExit auto-shutdown is active. Used for diagnostics.
     /// </summary>
     internal static bool ProcessExitRegistered => true;
+
+    private static unsafe void RegisterNativeAtexit()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        try
+        {
+            _ = atexit(&OnNativeProcessExit);
+        }
+        catch
+        {
+            // Best-effort fallback: AppDomain.ProcessExit remains registered.
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void OnNativeProcessExit()
+    {
+        ShutdownAll();
+    }
+
+    [DllImport("ucrtbase.dll", CallingConvention = CallingConvention.Cdecl, EntryPoint = "atexit")]
+    private static unsafe extern int atexit(delegate* unmanaged[Cdecl]<void> callback);
 }
