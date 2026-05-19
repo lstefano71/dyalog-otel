@@ -15,6 +15,7 @@ public static class PipelineRegistry
 {
     private static volatile Pipeline? _singleton;
     private static readonly ConcurrentDictionary<int, Pipeline> _pipelines = new();
+    private static readonly ConcurrentDictionary<int, PipelineBuilderState> _builders = new();
     private static int _nextHandle = 1;
     private static readonly object _initLock = new();
 
@@ -158,6 +159,68 @@ public static class PipelineRegistry
         pipeline?.Flush();
     }
 
+    /// <summary>
+    /// Create a new pipeline builder and return its handle.
+    /// The pipeline is not started until StartPipeline(handle) is called.
+    /// </summary>
+    public static int CreatePipelineBuilder()
+    {
+        int handle = Interlocked.Increment(ref _nextHandle);
+        _builders[handle] = new PipelineBuilderState();
+        return handle;
+    }
+
+    /// <summary>
+    /// Apply a config override to a specific pipeline builder (pre-start).
+    /// Returns: 0=ok, 1=unknown section/key, 3=no builder with this handle, 4=already started.
+    /// </summary>
+    public static int ApplyConfigOverrideToBuilder(int handle, string section, string key, string value)
+    {
+        if (!_builders.TryGetValue(handle, out var state))
+        {
+            // Check if pipeline already started
+            if (_pipelines.ContainsKey(handle))
+                return 4;
+            return 3;
+        }
+
+        var kind = ClassifyConfigOverride(section, key);
+        if (kind == ConfigOverrideKind.Unknown)
+            return 1;
+
+        lock (state.Lock)
+        {
+            state.Overrides[$"{section}\x1F{key}"] = new PendingConfigOverride(section, key, value);
+        }
+        return 0;
+    }
+
+    /// <summary>
+    /// Freeze config and start a pipeline by handle.
+    /// Returns: 0=ok, 3=no builder with this handle, 4=already started.
+    /// </summary>
+    public static int StartPipeline(int handle)
+    {
+        if (!_builders.TryRemove(handle, out var state))
+        {
+            if (_pipelines.ContainsKey(handle))
+                return 4;
+            return 3;
+        }
+
+        var config = ConfigLoader.Load();
+        lock (state.Lock)
+        {
+            foreach (var pending in state.Overrides.Values)
+                ApplyOverrideToConfig(config, pending.Section, pending.Key, pending.Value);
+        }
+
+        var pipeline = BuildPipeline(config);
+        _pipelines[handle] = pipeline;
+        pipeline.Start();
+        return 0;
+    }
+
     /// <summary>Merge layer-4 pre-init overrides into the loaded config.</summary>
     private static void ApplyOverridesToConfig(OTelConfig config)
     {
@@ -276,6 +339,12 @@ public static class PipelineRegistry
     }
 
     private sealed record PendingConfigOverride(string Section, string Key, string Value);
+
+    private sealed class PipelineBuilderState
+    {
+        public readonly object Lock = new();
+        public readonly Dictionary<string, PendingConfigOverride> Overrides = new(StringComparer.OrdinalIgnoreCase);
+    }
 
     private static ConfigOverrideKind ClassifyConfigOverride(string section, string key)
     {

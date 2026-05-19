@@ -1,3 +1,4 @@
+using System.Text;
 using Dyalog.OTel.Channels;
 
 namespace Dyalog.OTel.Destinations;
@@ -10,9 +11,8 @@ public sealed class TextDestination : IDestination, IResourceAwareDestination, I
     private readonly TimeProvider _timeProvider;
     private readonly object _sync = new();
     private readonly Dictionary<string, string> _resource = new();
+    private readonly CooperativeFileWriter _fileWriter;
 
-    private StreamWriter? _writer;
-    private string _currentPeriodKey = "";
     private bool _missingEmitterWarningWritten;
 
     internal TextDestination(TextDestinationOptions options, TimeProvider? timeProvider = null)
@@ -21,6 +21,13 @@ public sealed class TextDestination : IDestination, IResourceAwareDestination, I
         _renderer = new TextLineRenderer(options);
         _summaryEngine = new TextHistogramSummaryEngine(options.SummaryRules);
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _fileWriter = new CooperativeFileWriter(
+            options.Path,
+            options.Rotation,
+            options.Sharing,
+            options.Flush,
+            options.LockStyle,
+            options.LockTimeoutMs);
     }
 
     public string Name => "text";
@@ -39,9 +46,13 @@ public sealed class TextDestination : IDestination, IResourceAwareDestination, I
     {
         lock (_sync)
         {
-            EnsureWriter(GetUtcNow());
+            _fileWriter.Open();
             if (_options.EmitStartupBlock)
-                WriteBlock(_renderer.RenderStartupBlock(GetUtcNow(), _resource, _options.Path));
+            {
+                var sb = new StringBuilder();
+                AppendBlock(sb, _renderer.RenderStartupBlock(GetUtcNow(), _resource, _options.Path));
+                _fileWriter.Write(sb);
+            }
         }
     }
 
@@ -49,16 +60,22 @@ public sealed class TextDestination : IDestination, IResourceAwareDestination, I
     {
         lock (_sync)
         {
-            EmitReadySummaries();
+            var sb = new StringBuilder();
+            AppendReadySummaries(sb);
             if (!_options.AcceptLogs || batch.Length == 0)
+            {
+                if (sb.Length > 0) _fileWriter.Write(sb);
                 return;
+            }
 
             foreach (var record in batch)
             {
                 string emitter = _renderer.ResolveEmitter(record, out var missingEmitter);
                 WarnOnceForMissingEmitter(missingEmitter);
-                WriteBlock(_renderer.RenderLog(record, emitter));
+                AppendBlock(sb, _renderer.RenderLog(record, emitter));
             }
+
+            _fileWriter.Write(sb);
         }
     }
 
@@ -74,9 +91,13 @@ public sealed class TextDestination : IDestination, IResourceAwareDestination, I
     {
         lock (_sync)
         {
-            EmitReadySummaries();
+            var sb = new StringBuilder();
+            AppendReadySummaries(sb);
             if (!_options.AcceptMetricSummaries || batch.Length == 0)
+            {
+                if (sb.Length > 0) _fileWriter.Write(sb);
                 return;
+            }
 
             foreach (var point in batch)
             {
@@ -85,7 +106,8 @@ public sealed class TextDestination : IDestination, IResourceAwareDestination, I
                 _summaryEngine.Observe(point, emitter);
             }
 
-            EmitReadySummaries();
+            AppendReadySummaries(sb);
+            if (sb.Length > 0) _fileWriter.Write(sb);
         }
     }
 
@@ -93,8 +115,10 @@ public sealed class TextDestination : IDestination, IResourceAwareDestination, I
     {
         lock (_sync)
         {
-            EmitReadySummaries();
-            _writer?.Flush();
+            var sb = new StringBuilder();
+            AppendReadySummaries(sb);
+            if (sb.Length > 0) _fileWriter.Write(sb);
+            _fileWriter.Flush();
         }
     }
 
@@ -102,30 +126,35 @@ public sealed class TextDestination : IDestination, IResourceAwareDestination, I
     {
         lock (_sync)
         {
-            EmitReadySummaries();
+            var sb = new StringBuilder();
+            AppendReadySummaries(sb);
 
             if (_options.AcceptMetricSummaries)
             {
                 foreach (var summary in _summaryEngine.DrainPartial(GetUtcNow()))
-                    WriteBlock(_renderer.RenderSummary(summary));
+                    AppendBlock(sb, _renderer.RenderSummary(summary));
             }
 
-            _writer?.Flush();
-            _writer?.Dispose();
-            _writer = null;
-            _currentPeriodKey = "";
+            if (sb.Length > 0) _fileWriter.Write(sb);
+            _fileWriter.Shutdown();
         }
     }
 
     public void Dispose() => Shutdown();
 
-    private void EmitReadySummaries()
+    private void AppendReadySummaries(StringBuilder sb)
     {
         if (!_options.AcceptMetricSummaries || !_summaryEngine.HasRules)
             return;
 
         foreach (var summary in _summaryEngine.DrainReady(GetUtcNow()))
-            WriteBlock(_renderer.RenderSummary(summary));
+            AppendBlock(sb, _renderer.RenderSummary(summary));
+    }
+
+    private static void AppendBlock(StringBuilder sb, IReadOnlyList<string> lines)
+    {
+        foreach (var line in lines)
+            sb.AppendLine(line);
     }
 
     private void WarnOnceForMissingEmitter(bool missingEmitter)
@@ -136,53 +165,6 @@ public sealed class TextDestination : IDestination, IResourceAwareDestination, I
         Console.Error.WriteLine("[dyalog-otel] WARNING: destination.text received a signal without the canonical 'emitter' attribute. Rendering placeholder output.");
         _missingEmitterWarningWritten = true;
     }
-
-    private void WriteBlock(IReadOnlyList<string> lines)
-    {
-        if (lines.Count == 0)
-            return;
-
-        EnsureWriter(GetUtcNow());
-        foreach (var line in lines)
-            _writer!.WriteLine(line);
-    }
-
-    private void EnsureWriter(DateTimeOffset nowUtc)
-    {
-        string periodKey = GetPeriodKey(nowUtc.UtcDateTime);
-        if (_writer != null && periodKey == _currentPeriodKey)
-            return;
-
-        _writer?.Flush();
-        _writer?.Dispose();
-
-        _currentPeriodKey = periodKey;
-        string filePath = BuildRotatedPath(periodKey);
-        string? directory = Path.GetDirectoryName(filePath);
-        if (!string.IsNullOrEmpty(directory))
-            Directory.CreateDirectory(directory);
-
-        _writer = new StreamWriter(filePath, append: true) { AutoFlush = false };
-    }
-
-    private string BuildRotatedPath(string periodKey)
-    {
-        if (_options.Rotation == RotationPeriod.None)
-            return _options.Path;
-
-        string directory = Path.GetDirectoryName(_options.Path) ?? ".";
-        string name = Path.GetFileNameWithoutExtension(_options.Path);
-        string extension = Path.GetExtension(_options.Path);
-        return Path.Combine(directory, $"{name}-{periodKey}{extension}");
-    }
-
-    private string GetPeriodKey(DateTime utcNow) => _options.Rotation switch
-    {
-        RotationPeriod.Hourly => utcNow.ToString("yyyy-MM-dd-HH"),
-        RotationPeriod.Daily => utcNow.ToString("yyyy-MM-dd"),
-        RotationPeriod.Monthly => utcNow.ToString("yyyy-MM"),
-        _ => ""
-    };
 
     private DateTimeOffset GetUtcNow() => _timeProvider.GetUtcNow();
 }

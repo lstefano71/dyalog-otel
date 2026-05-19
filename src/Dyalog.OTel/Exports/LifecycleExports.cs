@@ -135,4 +135,50 @@ public static class LifecycleExports
         int status = PipelineRegistry.ApplyConfigOverride(sect, k, v);
         rslt.SetScalarInt(status);
     }
+
+    /// <summary>
+    /// pp_otel_create → handle
+    /// Create a new pipeline builder. Returns a non-zero handle.
+    /// Configure it with pp_otel_config_h, then start with pp_otel_start.
+    /// </summary>
+    [DwaExport("pp_otel_create")]
+    public static void Create(Localp rslt)
+    {
+        int handle = PipelineRegistry.CreatePipelineBuilder();
+        rslt.SetScalarInt(handle);
+    }
+
+    /// <summary>
+    /// pp_otel_config_h handle section key value → status
+    /// Configure a specific pipeline builder (pre-start).
+    /// Returns: 0=ok, 1=unknown key, 3=no builder, 4=already started
+    /// </summary>
+    [DwaExport("pp_otel_config_h")]
+    public static void ConfigByHandle(int handle, Localp section, Localp key, Localp value, Localp rslt)
+    {
+        string sect = section.HasValue ? section.ReadString() : "";
+        string k = key.HasValue ? key.ReadString() : "";
+        string v = value.HasValue ? value.ReadString() : "";
+
+        if (string.IsNullOrEmpty(sect) || string.IsNullOrEmpty(k))
+        {
+            rslt.SetScalarInt(1);
+            return;
+        }
+
+        int status = PipelineRegistry.ApplyConfigOverrideToBuilder(handle, sect, k, v);
+        rslt.SetScalarInt(status);
+    }
+
+    /// <summary>
+    /// pp_otel_start handle → status
+    /// Freeze config and start the pipeline.
+    /// Returns: 0=ok, 3=no builder, 4=already started
+    /// </summary>
+    [DwaExport("pp_otel_start")]
+    public static void Start(int handle, Localp rslt)
+    {
+        int status = PipelineRegistry.StartPipeline(handle);
+        rslt.SetScalarInt(status);
+    }
 }

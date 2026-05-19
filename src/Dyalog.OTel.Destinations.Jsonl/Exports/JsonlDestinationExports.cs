@@ -174,7 +174,11 @@ public static unsafe class JsonlDestinationExports
         string rawPath = properties.GetValueOrDefault("path", "otel.jsonl");
         string path = Path.GetFullPath(rawPath);
         string rotate = properties.GetValueOrDefault("rotate", "monthly");
-        return new JsonlFileDestination(path, ParseRotation(rotate), signals);
+        var sharing = ParseSharing(properties.GetValueOrDefault("sharing", "cooperative"));
+        var flush = ParseFlush(properties.GetValueOrDefault("flush", "batch"));
+        var lockStyle = ParseLockStyle(properties.GetValueOrDefault("lock_style", "inline"));
+        int lockTimeout = int.TryParse(properties.GetValueOrDefault("lock_timeout", "5000"), out var lt) ? lt : 5000;
+        return new JsonlFileDestination(path, ParseRotation(rotate), signals, sharing, flush, lockTimeout, lockStyle);
     }
 
     private static JsonlHttpDestination CreateHttp(Dictionary<string, string> properties, HashSet<string> signals)
@@ -190,6 +194,27 @@ public static unsafe class JsonlDestinationExports
         "monthly" => RotationPeriod.Monthly,
         "none" => RotationPeriod.None,
         _ => RotationPeriod.Monthly
+    };
+
+    private static SharingMode ParseSharing(string value) => value.Trim().ToLowerInvariant() switch
+    {
+        "cooperative" or "coop" => SharingMode.Cooperative,
+        "exclusive" => SharingMode.Exclusive,
+        _ => SharingMode.Cooperative
+    };
+
+    private static FlushMode ParseFlush(string value) => value.Trim().ToLowerInvariant() switch
+    {
+        "batch" => FlushMode.Batch,
+        "shutdown" => FlushMode.Shutdown,
+        _ => FlushMode.Batch
+    };
+
+    private static LockStyle ParseLockStyle(string value) => value.Trim().ToLowerInvariant() switch
+    {
+        "inline" => LockStyle.Inline,
+        "sidecar" => LockStyle.Sidecar,
+        _ => LockStyle.Inline
     };
 
     private static Dictionary<string, string>? ParseHeaders(Dictionary<string, string> properties)

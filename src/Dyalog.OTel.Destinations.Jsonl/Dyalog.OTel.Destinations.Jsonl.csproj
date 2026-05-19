@@ -19,5 +19,6 @@
   <ItemGroup>
     <Compile Include="..\Dyalog.OTel\Destinations\JsonlFileDestination.cs" Link="Destinations\JsonlFileDestination.cs" />
     <Compile Include="..\Dyalog.OTel\Destinations\JsonlHttpDestination.cs" Link="Destinations\JsonlHttpDestination.cs" />
+    <Compile Include="..\Dyalog.OTel\Destinations\CooperativeFileWriter.cs" Link="Destinations\CooperativeFileWriter.cs" />
   </ItemGroup>
 </Project>

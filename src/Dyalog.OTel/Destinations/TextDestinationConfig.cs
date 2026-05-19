@@ -6,6 +6,10 @@ internal sealed class TextDestinationOptions
 {
     public required string Path { get; init; }
     public RotationPeriod Rotation { get; init; } = RotationPeriod.Monthly;
+    public SharingMode Sharing { get; init; } = SharingMode.Cooperative;
+    public FlushMode Flush { get; init; } = FlushMode.Batch;
+    public LockStyle LockStyle { get; init; } = LockStyle.Inline;
+    public int LockTimeoutMs { get; init; } = 5000;
     public bool EmitStartupBlock { get; init; }
     public bool AcceptLogs { get; init; } = true;
     public bool AcceptMetricSummaries { get; init; }
@@ -47,6 +51,10 @@ internal static class TextDestinationConfig
         {
             Path = Path.GetFullPath(rawPath),
             Rotation = ParseRotation(config.Properties.GetValueOrDefault("rotate", "monthly")),
+            Sharing = ParseSharing(config.Properties.GetValueOrDefault("sharing", "cooperative")),
+            Flush = ParseFlush(config.Properties.GetValueOrDefault("flush", "batch")),
+            LockStyle = ParseLockStyle(config.Properties.GetValueOrDefault("lock_style", "inline")),
+            LockTimeoutMs = int.TryParse(config.Properties.GetValueOrDefault("lock_timeout", "5000"), out var lt) ? lt : 5000,
             EmitStartupBlock = ParseBoolean(config.Properties, "startup", defaultValue: false),
             AcceptLogs = acceptLogs,
             AcceptMetricSummaries = acceptMetrics && summaryRules.Count > 0,
@@ -149,6 +157,27 @@ internal static class TextDestinationConfig
         "monthly" => RotationPeriod.Monthly,
         "none" => RotationPeriod.None,
         _ => throw new InvalidOperationException($"Unsupported destination.text rotation '{value}'.")
+    };
+
+    private static SharingMode ParseSharing(string value) => value.Trim().ToLowerInvariant() switch
+    {
+        "cooperative" or "coop" => SharingMode.Cooperative,
+        "exclusive" => SharingMode.Exclusive,
+        _ => throw new InvalidOperationException($"Unsupported sharing mode '{value}'. Use 'cooperative' or 'exclusive'.")
+    };
+
+    private static FlushMode ParseFlush(string value) => value.Trim().ToLowerInvariant() switch
+    {
+        "batch" => FlushMode.Batch,
+        "shutdown" => FlushMode.Shutdown,
+        _ => throw new InvalidOperationException($"Unsupported flush mode '{value}'. Use 'batch' or 'shutdown'.")
+    };
+
+    private static LockStyle ParseLockStyle(string value) => value.Trim().ToLowerInvariant() switch
+    {
+        "inline" => LockStyle.Inline,
+        "sidecar" => LockStyle.Sidecar,
+        _ => throw new InvalidOperationException($"Unsupported lock_style '{value}'. Use 'inline' or 'sidecar'.")
     };
 
     private static bool ParseBoolean(Dictionary<string, string> properties, string key, bool defaultValue)
