@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 namespace Dyalog.OTel.PluginAbi;
 
 [StructLayout(LayoutKind.Sequential)]
-public unsafe struct DestinationFamilyApiV1
+public unsafe struct DestinationFamilyApiV2
 {
     public nuint AbiVersion;
     public delegate* unmanaged<byte*, int, byte*, int, nint*, byte*, int, int*, DestinationPluginStatus> CreateDestination;

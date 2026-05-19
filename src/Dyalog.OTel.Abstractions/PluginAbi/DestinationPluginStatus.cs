@@ -10,5 +10,6 @@ public enum DestinationPluginStatus : int
     SetResourceFailed = 5,
     WriteFailed = 6,
     FlushFailed = 7,
-    ShutdownFailed = 8
+    ShutdownFailed = 8,
+    SetEmitterConfigFailed = 9
 }

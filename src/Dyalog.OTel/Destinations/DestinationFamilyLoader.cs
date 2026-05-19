@@ -38,8 +38,8 @@ internal static unsafe class DestinationFamilyLoader
         {
             nint handle = NativeLibrary.Load(libraryPath);
             nint export = NativeLibrary.GetExport(handle, DestinationPluginContract.ExportName);
-            var getApi = (delegate* unmanaged<DestinationFamilyApiV1*>)export;
-            DestinationFamilyApiV1* api = getApi();
+            var getApi = (delegate* unmanaged<DestinationFamilyApiV2*>)export;
+            DestinationFamilyApiV2* api = getApi();
             if (api == null)
                 throw new InvalidOperationException($"Destination companion DLL '{libraryName}' returned a null API table.");
             if (api->AbiVersion != DestinationPluginContract.AbiVersion)
@@ -60,10 +60,10 @@ internal sealed unsafe class LoadedDestinationFamily(
     string libraryName,
     string libraryPath,
     nint libraryHandle,
-    DestinationFamilyApiV1* api)
+    DestinationFamilyApiV2* api)
 {
     public string LibraryName { get; } = libraryName;
     public string LibraryPath { get; } = libraryPath;
     public nint LibraryHandle { get; } = libraryHandle;
-    public DestinationFamilyApiV1* Api { get; } = api;
+    public DestinationFamilyApiV2* Api { get; } = api;
 }

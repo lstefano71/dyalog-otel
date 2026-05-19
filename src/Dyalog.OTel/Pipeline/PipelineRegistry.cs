@@ -33,9 +33,9 @@ public static class PipelineRegistry
 
     /// <summary>
     /// Pre-init config overrides (layer 4). Applied on top of INI + env at init time.
-    /// Key = "section.key", value = string.
+    /// Key = "section\x1Fkey", value = pending override record.
     /// </summary>
-    private static readonly Dictionary<string, string> _preInitOverrides = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, PendingConfigOverride> _preInitOverrides = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Returns 0 if not yet running, 1 if already running.</summary>
     public static int GetSingletonState() =>
@@ -77,32 +77,34 @@ public static class PipelineRegistry
 
     /// <summary>
     /// Apply a config override (layer 4). Returns 0 on success.
-    /// Pre-init: stores override. Post-init: only emitter.* sections allowed (returns 2 if frozen).
+    /// Pre-init: validates and stores override. Post-init: only emitter.* sections allowed (returns 2 if frozen).
+    /// Returns: 0=ok, 1=unknown section/key, 2=frozen (post-init).
     /// </summary>
     public static int ApplyConfigOverride(string section, string key, string value)
     {
-        bool isEmitterSection = section.StartsWith("emitter.", StringComparison.OrdinalIgnoreCase);
-
-        if (_singletonState == PipelineState.Running)
-        {
-            // Post-init: only emitter registration is allowed
-            if (!isEmitterSection)
-                return 2; // Frozen section
-
-            string emitterName = section["emitter.".Length..];
-            if (key.Equals("version", StringComparison.OrdinalIgnoreCase) && _singleton != null)
-            {
-                _singleton.EmitterRegistry[emitterName] = value;
-                return 0;
-            }
-            return 1; // Unknown key
-        }
-
-        // Pre-init: accumulate for merge at init time
-        string fullKey = $"{section}.{key}";
         lock (_initLock)
         {
-            _preInitOverrides[fullKey] = value;
+            var kind = ClassifyConfigOverride(section, key);
+            if (kind == ConfigOverrideKind.Unknown)
+                return 1;
+
+            if (_singletonState == PipelineState.Running)
+            {
+                if (kind != ConfigOverrideKind.MutableAfterInit)
+                    return 2; // Frozen section
+
+                string emitterName = section["emitter.".Length..];
+                if (_singleton != null)
+                {
+                    _singleton.EmitterRegistry[emitterName] = value;
+                    _singleton.ApplyEmitterConfigToDestinations(bestEffort: true);
+                }
+                return 0;
+            }
+
+            // Pre-init: accumulate for merge at init time
+            string overrideId = $"{section}\x1F{key}";
+            _preInitOverrides[overrideId] = new PendingConfigOverride(section, key, value);
         }
         return 0;
     }
@@ -159,66 +161,52 @@ public static class PipelineRegistry
     /// <summary>Merge layer-4 pre-init overrides into the loaded config.</summary>
     private static void ApplyOverridesToConfig(OTelConfig config)
     {
-        foreach (var (fullKey, value) in _preInitOverrides)
+        foreach (var pending in _preInitOverrides.Values)
         {
-            int dot = fullKey.IndexOf('.');
-            if (dot < 0) continue;
-            string section = fullKey[..dot];
-            string key = fullKey[(dot + 1)..];
-
-            switch (section.ToLowerInvariant())
-            {
-                case "resource":
-                    config.Resource[key] = value;
-                    break;
-                case "pipeline":
-                    if (key.Equals("emitter", StringComparison.OrdinalIgnoreCase))
-                        config.DefaultEmitter = value;
-                    else if (key.Equals("emitter.version", StringComparison.OrdinalIgnoreCase))
-                        config.DefaultEmitterVersion = value;
-                    break;
-                case "batch":
-                    ApplyBatchOverride(config.Batch, key, value);
-                    break;
-                case "destination":
-                    // key = "otlp.endpoint" → destType="otlp", prop="endpoint"
-                    int destDot = key.IndexOf('.');
-                    if (destDot > 0)
-                    {
-                        string destType = key[..destDot];
-                        string prop = key[(destDot + 1)..];
-                        var destConfig = config.Destinations.Find(d => d.Type.Equals(destType, StringComparison.OrdinalIgnoreCase));
-                        if (destConfig == null)
-                        {
-                            destConfig = new DestinationConfig { Type = destType };
-                            config.Destinations.Add(destConfig);
-                        }
-                        if (prop.Equals("signals", StringComparison.OrdinalIgnoreCase))
-                            destConfig.Signals = new HashSet<string>(value.Split(',').Select(s => s.Trim()), StringComparer.OrdinalIgnoreCase);
-                        else
-                            destConfig.Properties[prop] = value;
-                    }
-                    break;
-                default:
-                    // emitter.* sections
-                    if (fullKey.StartsWith("emitter.", StringComparison.OrdinalIgnoreCase))
-                    {
-                        // fullKey = "emitter.mylib.version" → section="emitter", key="mylib.version"
-                        // We need to parse: "emitter.<name>.version"
-                        string remainder = fullKey["emitter.".Length..]; // "mylib.version"
-                        int lastDot = remainder.LastIndexOf('.');
-                        if (lastDot > 0)
-                        {
-                            string emitterName = remainder[..lastDot];
-                            string prop = remainder[(lastDot + 1)..];
-                            if (prop.Equals("version", StringComparison.OrdinalIgnoreCase))
-                                config.EmitterRegistry[emitterName] = value;
-                        }
-                    }
-                    break;
-            }
+            ApplyOverrideToConfig(config, pending.Section, pending.Key, pending.Value);
         }
         _preInitOverrides.Clear();
+    }
+
+    private static void ApplyOverrideToConfig(OTelConfig config, string section, string key, string value)
+    {
+        switch (section.ToLowerInvariant())
+        {
+            case "resource":
+                config.Resource[key] = value;
+                return;
+            case "pipeline":
+                if (key.Equals("emitter", StringComparison.OrdinalIgnoreCase))
+                    config.DefaultEmitter = value;
+                else if (key.Equals("emitter.version", StringComparison.OrdinalIgnoreCase))
+                    config.DefaultEmitterVersion = value;
+                return;
+            case "batch":
+                ApplyBatchOverride(config.Batch, key, value);
+                return;
+        }
+
+        if (section.StartsWith("destination.", StringComparison.OrdinalIgnoreCase))
+        {
+            string destType = section["destination.".Length..];
+            var destConfig = config.Destinations.Find(d => d.Type.Equals(destType, StringComparison.OrdinalIgnoreCase));
+            if (destConfig == null)
+            {
+                destConfig = new DestinationConfig { Type = destType };
+                config.Destinations.Add(destConfig);
+            }
+            if (key.Equals("signals", StringComparison.OrdinalIgnoreCase))
+                destConfig.Signals = new HashSet<string>(value.Split(',').Select(s => s.Trim()), StringComparer.OrdinalIgnoreCase);
+            else
+                destConfig.Properties[key] = value;
+            return;
+        }
+
+        if (section.StartsWith("emitter.", StringComparison.OrdinalIgnoreCase))
+        {
+            string emitterName = section["emitter.".Length..];
+            config.EmitterRegistry[emitterName] = value;
+        }
     }
 
     private static void ApplyBatchOverride(BatchConfig batch, string key, string value)
@@ -267,10 +255,9 @@ public static class PipelineRegistry
         {
             if (dest is IResourceAwareDestination resourceAware)
                 resourceAware.SetResource(pipeline.Resource);
-            if (dest is IEmitterAwareDestination emitterAware)
-                emitterAware.SetEmitterConfig(pipeline.DefaultEmitter, pipeline.DefaultEmitterVersion, pipeline.EmitterRegistry);
         }
 
+        pipeline.ApplyEmitterConfigToDestinations(bestEffort: false);
         return pipeline;
     }
 
@@ -279,6 +266,62 @@ public static class PipelineRegistry
         Unconfigured,
         Configuring,
         Running
+    }
+
+    private enum ConfigOverrideKind
+    {
+        Unknown,
+        PreInitOnly,
+        MutableAfterInit
+    }
+
+    private sealed record PendingConfigOverride(string Section, string Key, string Value);
+
+    private static ConfigOverrideKind ClassifyConfigOverride(string section, string key)
+    {
+        if (string.IsNullOrWhiteSpace(section) || string.IsNullOrWhiteSpace(key))
+            return ConfigOverrideKind.Unknown;
+
+        if (section.Equals("resource", StringComparison.OrdinalIgnoreCase))
+            return ConfigOverrideKind.PreInitOnly; // resource.* is open-ended
+
+        if (section.Equals("pipeline", StringComparison.OrdinalIgnoreCase))
+        {
+            return key.Equals("emitter", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("emitter.version", StringComparison.OrdinalIgnoreCase)
+                ? ConfigOverrideKind.PreInitOnly
+                : ConfigOverrideKind.Unknown;
+        }
+
+        if (section.Equals("batch", StringComparison.OrdinalIgnoreCase))
+            return IsKnownBatchKey(key) ? ConfigOverrideKind.PreInitOnly : ConfigOverrideKind.Unknown;
+
+        if (section.StartsWith("destination.", StringComparison.OrdinalIgnoreCase))
+        {
+            string destType = section["destination.".Length..];
+            return !string.IsNullOrWhiteSpace(destType) && DestinationFactory.IsSupportedType(destType)
+                ? ConfigOverrideKind.PreInitOnly
+                : ConfigOverrideKind.Unknown;
+        }
+
+        if (section.StartsWith("emitter.", StringComparison.OrdinalIgnoreCase))
+        {
+            string emitterName = section["emitter.".Length..];
+            return !string.IsNullOrWhiteSpace(emitterName) && key.Equals("version", StringComparison.OrdinalIgnoreCase)
+                ? ConfigOverrideKind.MutableAfterInit
+                : ConfigOverrideKind.Unknown;
+        }
+
+        return ConfigOverrideKind.Unknown;
+    }
+
+    private static bool IsKnownBatchKey(string key)
+    {
+        return key.ToLowerInvariant() switch
+        {
+            "log.size" or "log.interval" or "span.size" or "span.interval" or "metric.size" or "metric.interval" => true,
+            _ => false
+        };
     }
 
     /// <summary>

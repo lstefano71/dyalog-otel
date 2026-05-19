@@ -101,10 +101,7 @@ internal sealed unsafe class PluginBackedDestination : IDestination, IResourceAw
         {
             var status = _family.Api->SetEmitterConfig(_handle, blobPtr, blob.Length);
             if (status != DestinationPluginStatus.Ok)
-            {
-                Shutdown();
                 throw new InvalidOperationException(BuildFailureMessage($"set emitter config on destination '{_name}'", _family, status));
-            }
         }
     }
 

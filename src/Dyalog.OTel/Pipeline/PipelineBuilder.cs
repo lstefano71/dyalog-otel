@@ -67,6 +67,18 @@ public sealed class PipelineBuilder
         var pipeline = new Pipeline(destinations, _config.Batch);
         var autoDetected = Resources.ResourceDetector.Detect();
         pipeline.Resource = Resources.ResourceDetector.Merge(autoDetected, _config.Resource);
+        pipeline.DefaultEmitter = _config.DefaultEmitter;
+        pipeline.DefaultEmitterVersion = _config.DefaultEmitterVersion;
+        foreach (var (name, version) in _config.EmitterRegistry)
+            pipeline.EmitterRegistry[name] = version;
+
+        foreach (var dest in destinations)
+        {
+            if (dest is IResourceAwareDestination resourceAware)
+                resourceAware.SetResource(pipeline.Resource);
+        }
+
+        pipeline.ApplyEmitterConfigToDestinations(bestEffort: false);
         return pipeline;
     }
 }

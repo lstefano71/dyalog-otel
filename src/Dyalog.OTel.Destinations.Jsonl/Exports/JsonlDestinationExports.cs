@@ -8,13 +8,13 @@ public static unsafe class JsonlDestinationExports
 {
     private static readonly nint ApiPointer = InitializeApiPointer();
 
-    [UnmanagedCallersOnly(EntryPoint = DestinationPluginContract.ExportName)]
-    public static DestinationFamilyApiV1* GetDestinationFamilyApi() => (DestinationFamilyApiV1*)ApiPointer;
+[UnmanagedCallersOnly(EntryPoint = DestinationPluginContract.ExportName)]
+    public static DestinationFamilyApiV2* GetDestinationFamilyApi() => (DestinationFamilyApiV2*)ApiPointer;
 
     private static nint InitializeApiPointer()
     {
-        var api = (DestinationFamilyApiV1*)NativeMemory.Alloc((nuint)1, (nuint)sizeof(DestinationFamilyApiV1));
-        *api = new DestinationFamilyApiV1
+        var api = (DestinationFamilyApiV2*)NativeMemory.Alloc((nuint)1, (nuint)sizeof(DestinationFamilyApiV2));
+        *api = new DestinationFamilyApiV2
         {
             AbiVersion = DestinationPluginContract.AbiVersion,
             CreateDestination = &CreateDestination,

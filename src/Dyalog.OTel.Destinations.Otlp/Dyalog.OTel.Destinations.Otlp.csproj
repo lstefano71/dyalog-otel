@@ -20,6 +20,7 @@
     <PackageReference Include="LightProto" Version="*" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="..\Dyalog.OTel\Destinations\EmitterConfigSnapshot.cs" Link="Destinations\EmitterConfigSnapshot.cs" />
     <Compile Include="..\Dyalog.OTel\Destinations\OtlpJsonDestination.cs" Link="Destinations\OtlpJsonDestination.cs" />
     <Compile Include="..\Dyalog.OTel\Destinations\OtlpProtobufDestination.cs" Link="Destinations\OtlpProtobufDestination.cs" />
     <Compile Include="..\Dyalog.OTel\Serialization\JsonModels\OtlpModels.cs" Link="Serialization\JsonModels\OtlpModels.cs" />

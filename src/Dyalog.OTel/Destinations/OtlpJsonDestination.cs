@@ -15,9 +15,7 @@ public sealed class OtlpJsonDestination : IDestination, IResourceAwareDestinatio
     private readonly string _endpoint;
     private readonly Dictionary<string, string> _headers;
     private readonly Dictionary<string, string> _resource;
-    private string _defaultEmitter = "dyalog-otel";
-    private string _defaultEmitterVersion = "";
-    private System.Collections.Concurrent.ConcurrentDictionary<string, string>? _emitterRegistry;
+    private EmitterConfigSnapshot _emitterConfig = new("dyalog-otel", "", null);
     private HttpClient? _client;
 
     public string Name => "otlp";
@@ -39,9 +37,7 @@ public sealed class OtlpJsonDestination : IDestination, IResourceAwareDestinatio
 
     public void SetEmitterConfig(string defaultEmitter, string defaultEmitterVersion, System.Collections.Concurrent.ConcurrentDictionary<string, string> registry)
     {
-        _defaultEmitter = defaultEmitter;
-        _defaultEmitterVersion = defaultEmitterVersion;
-        _emitterRegistry = registry;
+        Volatile.Write(ref _emitterConfig, new EmitterConfigSnapshot(defaultEmitter, defaultEmitterVersion, registry));
     }
 
     public void Init()
@@ -177,15 +173,17 @@ public sealed class OtlpJsonDestination : IDestination, IResourceAwareDestinatio
 
     private string ResolveEmitterName(string? emitter)
     {
-        return string.IsNullOrEmpty(emitter) ? _defaultEmitter : emitter;
+        var emitterConfig = Volatile.Read(ref _emitterConfig);
+        return string.IsNullOrEmpty(emitter) ? emitterConfig.DefaultEmitter : emitter;
     }
 
     private OtlpInstrumentationScope BuildJsonScope(string emitterName)
     {
-        string version = _defaultEmitterVersion;
-        if (_emitterRegistry != null && _emitterRegistry.TryGetValue(emitterName, out var v))
+        var emitterConfig = Volatile.Read(ref _emitterConfig);
+        string version = emitterConfig.DefaultEmitterVersion;
+        if (emitterConfig.Registry != null && emitterConfig.Registry.TryGetValue(emitterName, out var v))
             version = v;
-        else if (emitterName != _defaultEmitter)
+        else if (emitterName != emitterConfig.DefaultEmitter)
             version = "";
 
         return new OtlpInstrumentationScope { Name = emitterName, Version = version };

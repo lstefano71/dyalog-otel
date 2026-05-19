@@ -8,6 +8,15 @@ namespace Dyalog.OTel.Destinations;
 /// </summary>
 internal static class DestinationFactory
 {
+    public static bool IsSupportedType(string type)
+    {
+        return type.ToLowerInvariant() switch
+        {
+            "text" or "console" or "file" or "http" or "otlp" => true,
+            _ => false
+        };
+    }
+
     public static IDestination? Create(DestinationConfig config)
     {
         return config.Type.ToLowerInvariant() switch

@@ -177,4 +177,63 @@ public class EmitterScopeTests
 
         PipelineRegistry.Shutdown(0);
     }
+
+    [Fact]
+    public void PipelineRegistry_ApplyConfigOverride_PreInit_InvalidKey_Returns1()
+    {
+        PipelineRegistry.Shutdown(0);
+
+        // Invalid section.key combinations should return 1
+        int s1 = PipelineRegistry.ApplyConfigOverride("pipeline", "foo", "bar");
+        int s2 = PipelineRegistry.ApplyConfigOverride("invalid-section", "key", "val");
+        int s3 = PipelineRegistry.ApplyConfigOverride("destination.unknown-type", "endpoint", "http://x");
+
+        Assert.Equal(1, s1);
+        Assert.Equal(1, s2);
+        Assert.Equal(1, s3);
+
+        PipelineRegistry.Shutdown(0);
+    }
+
+    [Fact]
+    public void PipelineRegistry_ApplyConfigOverride_PostInit_InvalidEmitterKey_Returns1()
+    {
+        PipelineRegistry.Shutdown(0);
+        PipelineRegistry.GetOrCreateSingleton(); // force init
+
+        // Only "version" is a valid key for emitter.* sections
+        int status = PipelineRegistry.ApplyConfigOverride("emitter.component", "name", "wrong-key");
+        Assert.Equal(1, status);
+
+        PipelineRegistry.Shutdown(0);
+    }
+
+    [Fact]
+    public void Pipeline_ApplyEmitterConfig_PropagatesLateToDest()
+    {
+        var dest = new TestEmitterAwareDestination();
+        var pipeline = new PipelineInstance(new List<IDestination> { dest }, new BatchConfig());
+        pipeline.DefaultEmitter = "my-app";
+        pipeline.DefaultEmitterVersion = "1.0.0";
+        pipeline.EmitterRegistry["calc"] = "2.0.0";
+
+        // Initial propagation
+        pipeline.ApplyEmitterConfigToDestinations(bestEffort: false);
+
+        Assert.Equal(1, dest.SetEmitterConfigCallCount);
+        Assert.Equal("my-app", dest.LastDefaultEmitter);
+        Assert.Equal("1.0.0", dest.LastDefaultEmitterVersion);
+        Assert.True(dest.LastRegistry!.ContainsKey("calc"));
+        Assert.Equal("2.0.0", dest.LastRegistry["calc"]);
+
+        // Late registration
+        pipeline.EmitterRegistry["loader"] = "3.1.0";
+        pipeline.ApplyEmitterConfigToDestinations(bestEffort: false);
+
+        Assert.Equal(2, dest.SetEmitterConfigCallCount);
+        Assert.True(dest.LastRegistry!.ContainsKey("loader"));
+        Assert.Equal("3.1.0", dest.LastRegistry["loader"]);
+
+        pipeline.Shutdown();
+    }
 }

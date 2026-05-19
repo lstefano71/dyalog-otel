@@ -450,10 +450,35 @@ public sealed class Pipeline : IDisposable
     /// directly on the calling thread. Used by ProcessExit where background threads may be
     /// blocked by loader lock. Does not rely on consumer tasks being alive.
     /// </summary>
+    internal void ApplyEmitterConfigToDestinations(bool bestEffort)
+    {
+        foreach (var dest in _destinations)
+        {
+            if (dest is not IEmitterAwareDestination emitterAware)
+                continue;
+
+            if (!bestEffort)
+            {
+                emitterAware.SetEmitterConfig(DefaultEmitter, DefaultEmitterVersion, EmitterRegistry);
+                continue;
+            }
+
+            try
+            {
+                emitterAware.SetEmitterConfig(DefaultEmitter, DefaultEmitterVersion, EmitterRegistry);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[dyalog-otel] WARNING: failed to refresh emitter config on destination '{dest.Name}': {ex.Message}");
+            }
+        }
+    }
+
     public void EmergencyDrain()
     {
         // Stop batchers from pulling more items into private in-progress batches.
         Volatile.Write(ref _emergencyDraining, 1);
+        Thread.Yield(); // Give any mid-dequeue batcher a chance to finish
 
         // Drain logs
         var logs = new List<LogRecord>();
