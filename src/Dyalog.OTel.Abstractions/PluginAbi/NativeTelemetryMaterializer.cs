@@ -19,7 +19,8 @@ public static unsafe class NativeTelemetryMaterializer
                 Body = ReadString(record.Body),
                 TraceId = ReadBytes(record.TraceId),
                 SpanId = ReadBytes(record.SpanId),
-                Attributes = ReadAttributes(record.Attributes, record.AttributeCount)
+                Attributes = ReadAttributes(record.Attributes, record.AttributeCount),
+                Emitter = ReadNullableString(record.Emitter)
             };
         }
 
@@ -41,7 +42,8 @@ public static unsafe class NativeTelemetryMaterializer
                 StartTimeUnixNano = record.StartTimeUnixNano,
                 EndTimeUnixNano = record.EndTimeUnixNano,
                 StatusCode = record.StatusCode,
-                Attributes = ReadAttributes(record.Attributes, record.AttributeCount)
+                Attributes = ReadAttributes(record.Attributes, record.AttributeCount),
+                Emitter = ReadNullableString(record.Emitter)
             };
         }
 
@@ -60,7 +62,8 @@ public static unsafe class NativeTelemetryMaterializer
                 Name = ReadString(record.Name),
                 Value = record.Value,
                 Type = (MetricType)record.Type,
-                Attributes = ReadAttributes(record.Attributes, record.AttributeCount)
+                Attributes = ReadAttributes(record.Attributes, record.AttributeCount),
+                Emitter = ReadNullableString(record.Emitter)
             };
         }
 
@@ -114,6 +117,14 @@ public static unsafe class NativeTelemetryMaterializer
     {
         if (span.Ptr == null || span.Length == 0)
             return "";
+
+        return Encoding.UTF8.GetString(new ReadOnlySpan<byte>(span.Ptr, span.Length));
+    }
+
+    private static string? ReadNullableString(Utf8Span span)
+    {
+        if (span.Ptr == null || span.Length == 0)
+            return null;
 
         return Encoding.UTF8.GetString(new ReadOnlySpan<byte>(span.Ptr, span.Length));
     }

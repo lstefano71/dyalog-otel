@@ -1,6 +1,10 @@
 ; dyalog-otel configuration
 ; Place this file beside the DLL, in CWD, or set DYALOG_OTEL_CONFIG env var.
 
+[pipeline]
+emitter = my-apl-app
+emitter.version = 1.0.0
+
 [resource]
 service.name = my-apl-app
 deployment.environment = development
@@ -47,3 +51,10 @@ span.size = 256
 span.interval = 2000
 metric.size = 256
 metric.interval = 60000
+
+; Emitter registration (InstrumentationScope versioning for components):
+; [emitter.my-calculator]
+; version = 2.3.1
+;
+; [emitter.my-data-loader]
+; version = 1.0.0

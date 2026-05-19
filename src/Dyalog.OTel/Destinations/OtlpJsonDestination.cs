@@ -10,11 +10,14 @@ namespace Dyalog.OTel.Destinations;
 /// Sends telemetry in OTLP/JSON format to an OTLP-compatible endpoint.
 /// Uses source-generated JSON for NativeAOT compatibility.
 /// </summary>
-public sealed class OtlpJsonDestination : IDestination
+public sealed class OtlpJsonDestination : IDestination, IResourceAwareDestination, IEmitterAwareDestination
 {
     private readonly string _endpoint;
     private readonly Dictionary<string, string> _headers;
     private readonly Dictionary<string, string> _resource;
+    private string _defaultEmitter = "dyalog-otel";
+    private string _defaultEmitterVersion = "";
+    private System.Collections.Concurrent.ConcurrentDictionary<string, string>? _emitterRegistry;
     private HttpClient? _client;
 
     public string Name => "otlp";
@@ -34,6 +37,13 @@ public sealed class OtlpJsonDestination : IDestination
             _resource[kv.Key] = kv.Value;
     }
 
+    public void SetEmitterConfig(string defaultEmitter, string defaultEmitterVersion, System.Collections.Concurrent.ConcurrentDictionary<string, string> registry)
+    {
+        _defaultEmitter = defaultEmitter;
+        _defaultEmitterVersion = defaultEmitterVersion;
+        _emitterRegistry = registry;
+    }
+
     public void Init()
     {
         var handler = new SocketsHttpHandler
@@ -50,10 +60,17 @@ public sealed class OtlpJsonDestination : IDestination
         if (batch.Length == 0) return;
         var request = new OtlpExportLogsRequest();
         var resourceLogs = new OtlpResourceLogs { Resource = BuildResource() };
-        var scopeLogs = new OtlpScopeLogs();
 
+        var groups = new Dictionary<string, OtlpScopeLogs>(StringComparer.Ordinal);
         foreach (var record in batch)
         {
+            string emitterKey = ResolveEmitterName(record.Emitter);
+            if (!groups.TryGetValue(emitterKey, out var scopeLogs))
+            {
+                scopeLogs = new OtlpScopeLogs { Scope = BuildJsonScope(emitterKey) };
+                groups[emitterKey] = scopeLogs;
+            }
+
             scopeLogs.LogRecords.Add(new OtlpLogRecord
             {
                 TimeUnixNano = record.TimestampUnixNano.ToString(),
@@ -66,7 +83,8 @@ public sealed class OtlpJsonDestination : IDestination
             });
         }
 
-        resourceLogs.ScopeLogs.Add(scopeLogs);
+        foreach (var scopeLogs in groups.Values)
+            resourceLogs.ScopeLogs.Add(scopeLogs);
         request.ResourceLogs.Add(resourceLogs);
         Post($"{_endpoint}/v1/logs", JsonSerializer.Serialize(request, OtlpJsonContext.Default.OtlpExportLogsRequest));
     }
@@ -76,10 +94,17 @@ public sealed class OtlpJsonDestination : IDestination
         if (batch.Length == 0) return;
         var request = new OtlpExportTraceRequest();
         var resourceSpans = new OtlpResourceSpans { Resource = BuildResource() };
-        var scopeSpans = new OtlpScopeSpans();
 
+        var groups = new Dictionary<string, OtlpScopeSpans>(StringComparer.Ordinal);
         foreach (var record in batch)
         {
+            string emitterKey = ResolveEmitterName(record.Emitter);
+            if (!groups.TryGetValue(emitterKey, out var scopeSpans))
+            {
+                scopeSpans = new OtlpScopeSpans { Scope = BuildJsonScope(emitterKey) };
+                groups[emitterKey] = scopeSpans;
+            }
+
             scopeSpans.Spans.Add(new OtlpSpan
             {
                 TraceId = Convert.ToHexString(record.TraceId).ToLowerInvariant(),
@@ -93,7 +118,8 @@ public sealed class OtlpJsonDestination : IDestination
             });
         }
 
-        resourceSpans.ScopeSpans.Add(scopeSpans);
+        foreach (var scopeSpans in groups.Values)
+            resourceSpans.ScopeSpans.Add(scopeSpans);
         request.ResourceSpans.Add(resourceSpans);
         Post($"{_endpoint}/v1/traces", JsonSerializer.Serialize(request, OtlpJsonContext.Default.OtlpExportTraceRequest));
     }
@@ -103,10 +129,17 @@ public sealed class OtlpJsonDestination : IDestination
         if (batch.Length == 0) return;
         var request = new OtlpExportMetricsRequest();
         var resourceMetrics = new OtlpResourceMetrics { Resource = BuildResource() };
-        var scopeMetrics = new OtlpScopeMetrics();
 
+        var groups = new Dictionary<string, OtlpScopeMetrics>(StringComparer.Ordinal);
         foreach (var record in batch)
         {
+            string emitterKey = ResolveEmitterName(record.Emitter);
+            if (!groups.TryGetValue(emitterKey, out var scopeMetrics))
+            {
+                scopeMetrics = new OtlpScopeMetrics { Scope = BuildJsonScope(emitterKey) };
+                groups[emitterKey] = scopeMetrics;
+            }
+
             var metric = new OtlpMetric { Name = record.Name };
             var attrs = ConvertAttributes(record.Attributes, record.Template);
             var dp = new OtlpNumberDataPoint
@@ -132,7 +165,8 @@ public sealed class OtlpJsonDestination : IDestination
             scopeMetrics.Metrics.Add(metric);
         }
 
-        resourceMetrics.ScopeMetrics.Add(scopeMetrics);
+        foreach (var scopeMetrics in groups.Values)
+            resourceMetrics.ScopeMetrics.Add(scopeMetrics);
         request.ResourceMetrics.Add(resourceMetrics);
         Post($"{_endpoint}/v1/metrics", JsonSerializer.Serialize(request, OtlpJsonContext.Default.OtlpExportMetricsRequest));
     }
@@ -140,6 +174,22 @@ public sealed class OtlpJsonDestination : IDestination
     public void Flush() { }
     public void Shutdown() { _client?.Dispose(); _client = null; }
     public void Dispose() => Shutdown();
+
+    private string ResolveEmitterName(string? emitter)
+    {
+        return string.IsNullOrEmpty(emitter) ? _defaultEmitter : emitter;
+    }
+
+    private OtlpInstrumentationScope BuildJsonScope(string emitterName)
+    {
+        string version = _defaultEmitterVersion;
+        if (_emitterRegistry != null && _emitterRegistry.TryGetValue(emitterName, out var v))
+            version = v;
+        else if (emitterName != _defaultEmitter)
+            version = "";
+
+        return new OtlpInstrumentationScope { Name = emitterName, Version = version };
+    }
 
     private OtlpResource BuildResource()
     {

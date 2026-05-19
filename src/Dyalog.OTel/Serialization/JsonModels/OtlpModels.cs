@@ -41,10 +41,10 @@ public sealed class OtlpResource
 public sealed class OtlpInstrumentationScope
 {
     [JsonPropertyName("name")]
-    public string Name { get; set; } = "dyalog-otel";
+    public string Name { get; set; } = "";
 
     [JsonPropertyName("version")]
-    public string Version { get; set; } = "0.1.0";
+    public string Version { get; set; } = "";
 }
 
 // ── Logs ──

@@ -11,10 +11,10 @@ namespace Dyalog.OTel.Exports;
 public static class SpanExports
 {
     /// <summary>
-    /// pp_otel_span_start pipeline name parentHandle templateName attrs → spanHandle
+    /// pp_otel_span_start pipeline name parentHandle emitter templateName attrs → spanHandle
     /// </summary>
     [DwaExport("pp_otel_span_start")]
-    public static void SpanStart(int pipeline, Localp name, int parentHandle, Localp templateName, Localp attrs, Localp rslt)
+    public static void SpanStart(int pipeline, Localp name, int parentHandle, Localp emitter, Localp templateName, Localp attrs, Localp rslt)
     {
         var pipe = PipelineRegistry.Resolve(pipeline);
         if (pipe == null)
@@ -24,6 +24,7 @@ public static class SpanExports
         }
 
         string spanName = name.HasValue ? name.ReadString() : "unnamed";
+        string emitterName = ExportHelpers.ReadOptionalString(emitter);
         string tplName = ExportHelpers.ReadOptionalString(templateName);
 
         // Read start-time template and attributes
@@ -36,7 +37,7 @@ public static class SpanExports
             attributes = ExportHelpers.ReadAttributes(attrs);
 
         // Start the span (allocates handle, generates trace/span IDs)
-        int handle = pipe.StartSpan(spanName, parentHandle, null, attributes, snapshot);
+        int handle = pipe.StartSpan(spanName, parentHandle, null, emitterName, attributes, snapshot);
 
         rslt.SetScalarInt(handle);
     }

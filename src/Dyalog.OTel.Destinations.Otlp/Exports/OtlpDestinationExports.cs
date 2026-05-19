@@ -26,7 +26,8 @@ public static unsafe class OtlpDestinationExports
             WriteRawHistogramMetrics = null,
             Flush = &Flush,
             Shutdown = &Shutdown,
-            Destroy = &Destroy
+            Destroy = &Destroy,
+            SetEmitterConfig = &SetEmitterConfig
         };
         return (nint)api;
     }
@@ -90,6 +91,37 @@ public static unsafe class OtlpDestinationExports
                     break;
                 case OtlpProtobufDestination proto:
                     proto.SetResource(resource);
+                    break;
+            }
+
+            return DestinationPluginStatus.Ok;
+        }
+        catch
+        {
+            return DestinationPluginStatus.SetResourceFailed;
+        }
+    }
+
+    [UnmanagedCallersOnly]
+    private static DestinationPluginStatus SetEmitterConfig(nint destinationHandle, byte* configBlob, int configBlobLength)
+    {
+        try
+        {
+            var props = NativeTelemetryMaterializer.DecodePropertyBag(configBlob, configBlobLength);
+            string defaultEmitter = props.GetValueOrDefault("default.name", "dyalog-otel");
+            string defaultVersion = props.GetValueOrDefault("default.version", "");
+            props.Remove("default.name");
+            props.Remove("default.version");
+
+            var registry = new System.Collections.Concurrent.ConcurrentDictionary<string, string>(props, StringComparer.Ordinal);
+
+            switch (Resolve(destinationHandle))
+            {
+                case OtlpJsonDestination json:
+                    json.SetEmitterConfig(defaultEmitter, defaultVersion, registry);
+                    break;
+                case OtlpProtobufDestination proto:
+                    proto.SetEmitterConfig(defaultEmitter, defaultVersion, registry);
                     break;
             }
 

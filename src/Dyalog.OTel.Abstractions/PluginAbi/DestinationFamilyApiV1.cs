@@ -16,4 +16,6 @@ public unsafe struct DestinationFamilyApiV1
     public delegate* unmanaged<nint, DestinationPluginStatus> Flush;
     public delegate* unmanaged<nint, DestinationPluginStatus> Shutdown;
     public delegate* unmanaged<nint, void> Destroy;
+    /// <summary>Optional: pass emitter config (property-bag encoded). Null if not supported.</summary>
+    public delegate* unmanaged<nint, byte*, int, DestinationPluginStatus> SetEmitterConfig;
 }

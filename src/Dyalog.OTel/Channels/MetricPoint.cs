@@ -24,4 +24,7 @@ public sealed class MetricPoint
 
     /// <summary>Inline attributes captured from the APL call.</summary>
     public OTelAttribute[]? Attributes { get; init; }
+
+    /// <summary>Emitter name (InstrumentationScope). Null/empty = pipeline default.</summary>
+    public string? Emitter { get; init; }
 }

@@ -1,0 +1,181 @@
+#!/usr/local/bin/dyalogscript
+⍝ Programmatic configuration test: no INI file needed.
+⍝ Configures everything via pp_otel_config, emits from multiple emitters,
+⍝ and sends to an OTLP collector at localhost:4318.
+⍝
+⍝ Usage:  .\run_apl.ps1 test_programmatic.apls
+⍝
+⍝ NOTE: No companion .ini file exists for this script — that's intentional.
+⍝       All configuration is done in code via pp_otel_config.
+
+⎕IO←0 ⋄ ⎕ML←1
+
+dll←'##DLLPATH##'
+
+⎕←'=== Programmatic Config + Multi-Emitter Test ==='
+⎕←''
+
+⍝ --- Declare all ⎕NA bindings ---
+⎕NA dll,'|pp_otel_config <PP <PP <PP >PP'
+⎕NA dll,'|pp_otel_init >PP'
+⎕NA dll,'|pp_otel_log I4 I4 <PP <PP <PP <PP'
+⎕NA dll,'|pp_otel_span_start I4 <PP I4 <PP <PP <PP >PP'
+⎕NA dll,'|pp_otel_span_end I4 I4 <PP <PP'
+⎕NA dll,'|pp_otel_metric I4 <PP <PP I4 <PP <PP <PP'
+⎕NA dll,'|pp_otel_flush I4'
+⎕NA dll,'|pp_otel_shutdown I4'
+⎕NA dll,'|pp_otel_stats I4 >PP'
+
+⍝ --- Configure everything in code (layer 4 overrides) ---
+⎕←'Configuring via pp_otel_config...'
+
+⍝ Resource
+r←pp_otel_config 'resource' 'service.name' 'programmatic-test' 0
+⎕←'  resource.service.name → status: ',⍕r
+r←pp_otel_config 'resource' 'service.version' '1.0.0' 0
+r←pp_otel_config 'resource' 'deployment.environment' 'test' 0
+
+⍝ Pipeline: default emitter for signals that pass ''
+r←pp_otel_config 'pipeline' 'emitter' 'main-app' 0
+⎕←'  pipeline.emitter → status: ',⍕r
+r←pp_otel_config 'pipeline' 'emitter.version' '1.0.0' 0
+
+⍝ Destination: OTLP/Protobuf to localhost collector
+r←pp_otel_config 'destination.otlp' 'endpoint' 'http://localhost:4318' 0
+⎕←'  destination.otlp.endpoint → status: ',⍕r
+r←pp_otel_config 'destination.otlp' 'protocol' 'protobuf' 0
+r←pp_otel_config 'destination.otlp' 'signals' 'log,span,metric' 0
+
+⍝ Register two component emitters with their versions
+r←pp_otel_config 'emitter.calculator' 'version' '2.3.0' 0
+⎕←'  emitter.calculator.version → status: ',⍕r
+r←pp_otel_config 'emitter.data-loader' 'version' '1.1.0' 0
+
+⍝ Batch: fast intervals for test visibility
+r←pp_otel_config 'batch' 'log.interval' '1000' 0
+r←pp_otel_config 'batch' 'span.interval' '1000' 0
+r←pp_otel_config 'batch' 'metric.interval' '1000' 0
+
+⎕←'  ✓ All config applied'
+⎕←''
+
+⍝ --- Init (applies accumulated config) ---
+⎕←'Initialising pipeline...'
+status←pp_otel_init 0
+⎕←'  init status: ',⍕status,' (0=fresh, 1=already running)'
+⎕←''
+
+⍝ --- Register a late-arriving emitter (post-init, allowed for emitter.*) ---
+r←pp_otel_config 'emitter.late-plugin' 'version' '0.5.0' 0
+⎕←'Post-init emitter registration → status: ',⍕r,' (0=ok)'
+
+⍝ Verify frozen sections are rejected post-init
+r←pp_otel_config 'resource' 'service.name' 'too-late' 0
+⎕←'Post-init resource change → status: ',⍕r,' (2=frozen, expected)'
+⎕←''
+
+⍝ ═══════════════════════════════════════════════════
+⍝ EMIT FROM MULTIPLE EMITTERS
+⍝ ═══════════════════════════════════════════════════
+
+⍝ --- Emitter 1: 'main-app' (default, pass '') ---
+⎕←'=== Emitter: main-app (default) ==='
+pp_otel_log 0 9 'Application started successfully' '' '' ⍬
+pp_otel_log 0 9 'Processing request {Method} {Path}' '' '' ('GET' '/api/health')
+⎕←'  2 logs sent'
+
+sh_main←pp_otel_span_start 0 'http.request' 0 '' '' ('http.method' 'GET' 'http.route' '/api/health') 0
+⎕DL 0.03
+pp_otel_span_end 0 sh_main '' ⍬
+⎕←'  1 span completed'
+
+pp_otel_metric 0 'http.requests.total' (,1) 0 '' '' ⍬
+⎕←'  1 counter incremented'
+⎕←''
+
+⍝ --- Emitter 2: 'calculator' (registered v2.3.0) ---
+⎕←'=== Emitter: calculator (v2.3.0) ==='
+pp_otel_log 0 9 'Calculating portfolio value for {ClientId}' 'calculator' '' (42)
+pp_otel_log 0 13 'High complexity detected — switching to iterative solver' 'calculator' '' ⍬
+⎕←'  2 logs sent'
+
+sh_calc←pp_otel_span_start 0 'calculate.portfolio' 0 'calculator' '' ('client.id' '42') 0
+⎕DL 0.05
+pp_otel_span_end 0 sh_calc '' ('result.positions' '17')
+⎕←'  1 span completed'
+
+pp_otel_metric 0 'calculator.evaluations' (,1) 0 'calculator' '' ⍬
+pp_otel_metric 0 'calculator.latency_ms' (,50.2) 1 'calculator' '' ⍬
+⎕←'  2 metrics sent'
+⎕←''
+
+⍝ --- Emitter 3: 'data-loader' (registered v1.1.0) ---
+⎕←'=== Emitter: data-loader (v1.1.0) ==='
+pp_otel_log 0 9 'Loading market data for {Exchange}' 'data-loader' '' (,⊂'NYSE')
+pp_otel_log 0 9 'Loaded {Count} instruments in {Duration}ms' 'data-loader' '' (1500 230)
+⎕←'  2 logs sent'
+
+sh_load←pp_otel_span_start 0 'data.load' 0 'data-loader' '' ('exchange' 'NYSE') 0
+⎕DL 0.04
+pp_otel_span_end 0 sh_load '' ('instruments.count' '1500')
+⎕←'  1 span completed'
+
+pp_otel_metric 0 'data.load.duration_ms' (,230) 2 'data-loader' '' ⍬
+⎕←'  1 histogram metric sent'
+⎕←''
+
+⍝ --- Emitter 4: 'late-plugin' (registered post-init, v0.5.0) ---
+⎕←'=== Emitter: late-plugin (v0.5.0, registered post-init) ==='
+pp_otel_log 0 9 'Plugin activated on demand' 'late-plugin' '' ⍬
+pp_otel_metric 0 'plugin.activations' (,1) 0 'late-plugin' '' ⍬
+⎕←'  1 log + 1 metric sent'
+⎕←''
+
+⍝ --- Mixed: a parent span from main-app with children from different emitters ---
+⎕←'=== Cross-emitter trace ==='
+sh_parent←pp_otel_span_start 0 'process.order' 0 '' '' ('order.id' '9001') 0
+⎕←'  parent span (main-app): handle ',⍕sh_parent
+
+sh_child1←pp_otel_span_start 0 'calculate.price' sh_parent 'calculator' '' ⍬ 0
+⎕DL 0.02
+pp_otel_span_end 0 sh_child1 '' ⍬
+⎕←'  child span (calculator) completed'
+
+sh_child2←pp_otel_span_start 0 'load.customer' sh_parent 'data-loader' '' ⍬ 0
+⎕DL 0.01
+pp_otel_span_end 0 sh_child2 '' ⍬
+⎕←'  child span (data-loader) completed'
+
+⎕DL 0.01
+pp_otel_span_end 0 sh_parent '' ('order.status' 'confirmed')
+⎕←'  parent span (main-app) completed'
+⎕←''
+
+⍝ --- Flush ---
+⎕←'Flushing...'
+pp_otel_flush 0
+⎕DL 2
+⎕←'  ✓ flushed'
+
+⍝ --- Stats ---
+raw←pp_otel_stats 0 0
+stats←3 3⍴raw
+⎕←''
+⎕←'Stats (enqueued / exported / dropped):'
+⎕←'  Logs:    ',⍕stats[0;]
+⎕←'  Spans:   ',⍕stats[1;]
+⎕←'  Metrics: ',⍕stats[2;]
+
+⍝ --- Shutdown ---
+⎕←''
+⎕←'Shutting down...'
+pp_otel_shutdown 0
+⎕←'  ✓ done'
+
+⎕←''
+⎕←'=== Check your collector/dashboard ==='
+⎕←'You should see:'
+⎕←'  • 4 distinct InstrumentationScope entries: main-app, calculator, data-loader, late-plugin'
+⎕←'  • Each scope has its registered version (1.0.0, 2.3.0, 1.1.0, 0.5.0)'
+⎕←'  • A cross-emitter trace with parent (main-app) and children (calculator, data-loader)'
+⎕←'  • All signals tagged with service.name=programmatic-test'

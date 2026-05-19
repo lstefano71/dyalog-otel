@@ -49,6 +49,18 @@ public sealed class Pipeline : IDisposable
     public TemplateRegistry Templates { get; } = new();
     public Dictionary<string, string> Resource { get; set; } = new();
 
+    /// <summary>Default emitter name (InstrumentationScope.name) for this pipeline.</summary>
+    public string DefaultEmitter { get; set; } = "dyalog-otel";
+
+    /// <summary>Default emitter version (InstrumentationScope.version) for this pipeline.</summary>
+    public string DefaultEmitterVersion { get; set; } = "";
+
+    /// <summary>
+    /// Registered emitter name → version. Thread-safe: interpreter writes, serialization reads.
+    /// </summary>
+    public System.Collections.Concurrent.ConcurrentDictionary<string, string> EmitterRegistry { get; }
+        = new(StringComparer.Ordinal);
+
     // Interpreter-thread-only: DWA guarantees all exports are called from a single thread
     private readonly Dictionary<int, ActiveSpan> _activeSpans = new();
     private int _nextSpanHandle = 1;
@@ -164,7 +176,7 @@ public sealed class Pipeline : IDisposable
 
     // ── Span management (called from interpreter thread) ──
 
-    public int StartSpan(string name, int parentHandle, byte[]? traceId, OTelAttribute[]? startAttrs = null, Templates.TemplateSnapshot? startTemplate = null)
+    public int StartSpan(string name, int parentHandle, byte[]? traceId, string? emitter = null, OTelAttribute[]? startAttrs = null, Templates.TemplateSnapshot? startTemplate = null)
     {
         int handle = _nextSpanHandle++;
         if (handle <= 0) // wrapped past int.MaxValue or hit 0
@@ -185,6 +197,7 @@ public sealed class Pipeline : IDisposable
             SpanId = spanId,
             ParentSpanId = parentSpanId,
             Name = name,
+            Emitter = emitter,
             StartTimeUnixNano = GetTimestampNano(),
             StartAttributes = startAttrs,
             StartTemplate = startTemplate
@@ -215,6 +228,7 @@ public sealed class Pipeline : IDisposable
             SpanId = span.SpanId,
             ParentSpanId = span.ParentSpanId,
             Name = span.Name,
+            Emitter = span.Emitter,
             StartTimeUnixNano = span.StartTimeUnixNano,
             EndTimeUnixNano = GetTimestampNano(),
             Template = mergedTemplate,
@@ -410,6 +424,93 @@ public sealed class Pipeline : IDisposable
             d.Shutdown();
     }
 
+    /// <summary>
+    /// Emergency drain: synchronously read all remaining items from channels and export them
+    /// directly on the calling thread. Used by ProcessExit where background threads may be
+    /// blocked by loader lock. Does not rely on consumer tasks being alive.
+    /// </summary>
+    public void EmergencyDrain()
+    {
+        // Complete writers to prevent new enqueues
+        _logChannel.Writer.TryComplete();
+        _spanChannel.Writer.TryComplete();
+        _metricChannel.Writer.TryComplete();
+
+        // Drain logs
+        var logs = new List<LogRecord>();
+        while (_logChannel.Reader.TryRead(out var log))
+            logs.Add(log);
+        if (logs.Count > 0)
+        {
+            try
+            {
+                foreach (var d in _destinations)
+                    d.WriteLogs(CollectionsMarshal.AsSpan(logs));
+            }
+            catch { /* best-effort */ }
+        }
+
+        // Drain spans
+        var spans = new List<SpanRecord>();
+        while (_spanChannel.Reader.TryRead(out var span))
+            spans.Add(span);
+        if (spans.Count > 0)
+        {
+            try
+            {
+                foreach (var d in _destinations)
+                    d.WriteSpans(CollectionsMarshal.AsSpan(spans));
+            }
+            catch { /* best-effort */ }
+        }
+
+        // Drain metrics
+        var metrics = new List<MetricPoint>();
+        while (_metricChannel.Reader.TryRead(out var metric))
+            metrics.Add(metric);
+        FlushHistograms(); // flush any accumulated histogram buckets
+        if (metrics.Count > 0)
+        {
+            try
+            {
+                foreach (var d in _destinations)
+                    d.WriteMetrics(CollectionsMarshal.AsSpan(metrics));
+            }
+            catch { /* best-effort */ }
+        }
+
+        // Also drain any already-batched items waiting in batch channels
+        while (_logBatches.Reader.TryRead(out var logBatch))
+        {
+            try { foreach (var d in _destinations) d.WriteLogs(CollectionsMarshal.AsSpan(logBatch)); }
+            catch { /* best-effort */ }
+        }
+        while (_spanBatches.Reader.TryRead(out var spanBatch))
+        {
+            try { foreach (var d in _destinations) d.WriteSpans(CollectionsMarshal.AsSpan(spanBatch)); }
+            catch { /* best-effort */ }
+        }
+        while (_metricBatches.Reader.TryRead(out var metricBatch))
+        {
+            try { foreach (var d in _destinations) d.WriteMetrics(CollectionsMarshal.AsSpan(metricBatch)); }
+            catch { /* best-effort */ }
+        }
+
+        // Flush destinations (HTTP clients send remaining data)
+        try
+        {
+            foreach (var d in _destinations)
+                d.Flush();
+        }
+        catch { /* best-effort */ }
+
+        // Shutdown destinations
+        foreach (var d in _destinations)
+        {
+            try { d.Shutdown(); } catch { }
+        }
+    }
+
     public void Dispose() => Shutdown();
 
     /// <summary>Pipeline health: 0=healthy, 1=degraded, 2=down.</summary>
@@ -541,6 +642,7 @@ public sealed class Pipeline : IDisposable
         public required byte[] SpanId { get; init; }
         public byte[]? ParentSpanId { get; init; }
         public required string Name { get; init; }
+        public string? Emitter { get; init; }
         public long StartTimeUnixNano { get; init; }
         public OTelAttribute[]? StartAttributes { get; init; }
         public Templates.TemplateSnapshot? StartTemplate { get; init; }

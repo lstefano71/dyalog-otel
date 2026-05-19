@@ -35,6 +35,14 @@ public interface IResourceAwareDestination
 }
 
 /// <summary>
+/// Destinations that need emitter/scope info for grouping signals by InstrumentationScope.
+/// </summary>
+public interface IEmitterAwareDestination
+{
+    void SetEmitterConfig(string defaultEmitter, string defaultEmitterVersion, System.Collections.Concurrent.ConcurrentDictionary<string, string> registry);
+}
+
+/// <summary>
 /// Marker for destinations that need raw histogram observations in addition to
 /// the pipeline's aggregated histogram export path.
 /// </summary>

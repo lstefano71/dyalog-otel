@@ -20,32 +20,32 @@ h←pp_otel_init 0
 ⍝ --- Send logs ---
 ⎕←''
 ⎕←'Sending 5 log records...'
-⎕NA dll,'|pp_otel_log I4 I4 <PP <PP <PP'
-pp_otel_log 0 9  'Hello from Dyalog APL (info)'        '' ⍬
-pp_otel_log 0 13 'Caution: high latency detected'      '' ⍬
-pp_otel_log 0 17 'Error processing request {ReqId}'    '' (42)
-pp_otel_log 0 5  'Debug: cache hit ratio {Ratio}'      '' (0.95)
-pp_otel_log 0 9  'Order {OrderId} placed for {Amount}' '' (1001 59.99)
+⎕NA dll,'|pp_otel_log I4 I4 <PP <PP <PP <PP'
+pp_otel_log 0 9  'Hello from Dyalog APL (info)'        '' '' ⍬
+pp_otel_log 0 13 'Caution: high latency detected'      '' '' ⍬
+pp_otel_log 0 17 'Error processing request {ReqId}'    '' '' (42)
+pp_otel_log 0 5  'Debug: cache hit ratio {Ratio}'      '' '' (0.95)
+pp_otel_log 0 9  'Order {OrderId} placed for {Amount}' '' '' (1001 59.99)
 ⎕←'  ✓ 5 logs sent'
 
 ⍝ --- Send spans ---
 ⎕←''
 ⎕←'Sending 3 spans...'
-⎕NA dll,'|pp_otel_span_start I4 <PP I4 <PP <PP >PP'
+⎕NA dll,'|pp_otel_span_start I4 <PP I4 <PP <PP <PP >PP'
 ⎕NA dll,'|pp_otel_span_end I4 I4 <PP <PP'
 
 ⍝ Span 1: a parent span
-sh1←pp_otel_span_start 0 'http.request' 0 '' ⍬ 0
+sh1←pp_otel_span_start 0 'http.request' 0 '' '' ⍬ 0
 ⎕←'  span 1 handle: ',⍕sh1
 
 ⍝ Span 2: child of http.request
-sh2←pp_otel_span_start 0 'db.query' sh1 '' ⍬ 0
+sh2←pp_otel_span_start 0 'db.query' sh1 '' '' ⍬ 0
 ⎕DL 0.05   ⍝ simulate 50ms work
 pp_otel_span_end 0 sh2 '' ⍬
 ⎕←'  span 2 (db.query) ended'
 
 ⍝ Span 3: another child of http.request
-sh3←pp_otel_span_start 0 'cache.lookup' sh1 '' ⍬ 0
+sh3←pp_otel_span_start 0 'cache.lookup' sh1 '' '' ⍬ 0
 ⎕DL 0.02   ⍝ simulate 20ms work
 pp_otel_span_end 0 sh3 '' ⍬
 ⎕←'  span 3 (cache.lookup) ended'
@@ -58,20 +58,20 @@ pp_otel_span_end 0 sh1 '' ⍬
 ⍝ --- Send metrics ---
 ⎕←''
 ⎕←'Sending 4 metrics...'
-⎕NA dll,'|pp_otel_metric I4 <PP <PP I4 <PP <PP'
-pp_otel_metric 0 'http.requests.total'    (,1)    0 '' ⍬    ⍝ counter
-pp_otel_metric 0 'http.requests.total'    (,1)    0 '' ⍬    ⍝ counter again (increment)
-pp_otel_metric 0 'system.cpu.utilization' (,0.73) 1 '' ⍬    ⍝ gauge
-pp_otel_metric 0 'http.request.duration'  (,0.42) 2 '' ⍬    ⍝ histogram
+⎕NA dll,'|pp_otel_metric I4 <PP <PP I4 <PP <PP <PP'
+pp_otel_metric 0 'http.requests.total'    (,1)    0 '' '' ⍬    ⍝ counter
+pp_otel_metric 0 'http.requests.total'    (,1)    0 '' '' ⍬    ⍝ counter again (increment)
+pp_otel_metric 0 'system.cpu.utilization' (,0.73) 1 '' '' ⍬    ⍝ gauge
+pp_otel_metric 0 'http.request.duration'  (,0.42) 2 '' '' ⍬    ⍝ histogram
 ⎕←'  ✓ 4 metrics sent'
 
-⍝ { _←⎕DL 0.05 ⋄ pp_otel_metric 0 'system.cpu.utilization' (,0.33+(⍵*0.5)÷40) 1 '' ⍬}¨⍳100
+⍝ { _←⎕DL 0.05 ⋄ pp_otel_metric 0 'system.cpu.utilization' (,0.33+(⍵*0.5)÷40) 1 '' '' ⍬}¨⍳100
 
 ⍝ --- Flush to push everything to Fluent Bit ---
 ⎕←''
 ⎕←'Flushing pipeline...'
 ⎕NA dll,'|pp_otel_flush I4'
-pp_otel_flush 0
+⍝pp_otel_flush 0
 ⎕DL 2   ⍝ give consumer threads + HTTP time to deliver
 ⎕←'  ✓ flushed'
 
@@ -79,7 +79,7 @@ pp_otel_flush 0
 ⎕←''
 ⎕←'Shutting down...'
 ⎕NA dll,'|pp_otel_shutdown I4'
-pp_otel_shutdown 0
+⍝pp_otel_shutdown 0
 ⎕←'  ✓ shutdown'
 
 ⎕←''

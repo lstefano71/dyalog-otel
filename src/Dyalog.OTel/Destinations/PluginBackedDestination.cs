@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 using Dyalog.OTel.Channels;
 using Dyalog.OTel.Config;
@@ -5,7 +6,7 @@ using Dyalog.OTel.PluginAbi;
 
 namespace Dyalog.OTel.Destinations;
 
-internal sealed unsafe class PluginBackedDestination : IDestination, IResourceAwareDestination
+internal sealed unsafe class PluginBackedDestination : IDestination, IResourceAwareDestination, IEmitterAwareDestination
 {
     private readonly LoadedDestinationFamily _family;
     private readonly nint _handle;
@@ -76,6 +77,33 @@ internal sealed unsafe class PluginBackedDestination : IDestination, IResourceAw
             {
                 Shutdown();
                 throw new InvalidOperationException(BuildFailureMessage($"set resource on destination '{_name}'", _family, status));
+            }
+        }
+    }
+
+    public void SetEmitterConfig(string defaultEmitter, string defaultEmitterVersion, ConcurrentDictionary<string, string> registry)
+    {
+        EnsureNotDestroyed();
+        if (_family.Api->SetEmitterConfig == null)
+            return;
+
+        // Encode as property bag: "default.name" → emitter, "default.version" → version, "<name>" → "<version>"
+        var pairs = new List<KeyValuePair<string, string>>
+        {
+            new("default.name", defaultEmitter),
+            new("default.version", defaultEmitterVersion)
+        };
+        foreach (var (name, version) in registry)
+            pairs.Add(new KeyValuePair<string, string>(name, version));
+
+        byte[] blob = PropertyBagCodec.Encode(pairs);
+        fixed (byte* blobPtr = blob)
+        {
+            var status = _family.Api->SetEmitterConfig(_handle, blobPtr, blob.Length);
+            if (status != DestinationPluginStatus.Ok)
+            {
+                Shutdown();
+                throw new InvalidOperationException(BuildFailureMessage($"set emitter config on destination '{_name}'", _family, status));
             }
         }
     }

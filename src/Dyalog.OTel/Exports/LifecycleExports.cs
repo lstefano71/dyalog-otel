@@ -10,14 +10,19 @@ namespace Dyalog.OTel.Exports;
 public static class LifecycleExports
 {
     /// <summary>
-    /// pp_otel_init → 0 (singleton handle)
-    /// Lazy-init: loads config file + env vars, starts consumer threads.
+    /// pp_otel_init → (status handle)
+    /// Lazy-init: loads config file + env vars + layer-4 overrides, starts consumer threads.
+    /// status: 0=ok, 1=already running (returns existing handle)
+    /// handle: pipeline handle (always 0 for singleton)
+    /// From APL: 'I4 ',dll,'|pp_otel_init >I4' → 2-element (status handle)
     /// </summary>
     [DwaExport("pp_otel_init")]
     public static void Init(Localp rslt)
     {
+        var state = PipelineRegistry.GetSingletonState();
+        int status = (state == 0) ? 0 : 1; // 0=fresh init, 1=already running
         PipelineRegistry.GetOrCreateSingleton();
-        rslt.SetScalarInt(0);
+        rslt.SetScalarInt(status);
     }
 
     /// <summary>
@@ -105,5 +110,29 @@ public static class LifecycleExports
     public static void SetResource(int pipeline, Localp attrs)
     {
         Console.Error.WriteLine("[dyalog-otel] WARNING: pp_otel_resource is not yet implemented. Configure resource via INI file or OTEL_RESOURCE_ATTRIBUTES env var.");
+    }
+
+    /// <summary>
+    /// pp_otel_config section key value → status
+    ///
+    /// Generic configuration setter that mirrors INI sections.
+    /// section: 'resource', 'pipeline', 'batch', 'destination.otlp', 'emitter.mylib', etc.
+    /// Returns: 0=ok, 1=unknown key, 2=frozen section (post-init)
+    /// </summary>
+    [DwaExport("pp_otel_config")]
+    public static void Config(Localp section, Localp key, Localp value, Localp rslt)
+    {
+        string sect = section.HasValue ? section.ReadString() : "";
+        string k = key.HasValue ? key.ReadString() : "";
+        string v = value.HasValue ? value.ReadString() : "";
+
+        if (string.IsNullOrEmpty(sect) || string.IsNullOrEmpty(k))
+        {
+            rslt.SetScalarInt(1);
+            return;
+        }
+
+        int status = PipelineRegistry.ApplyConfigOverride(sect, k, v);
+        rslt.SetScalarInt(status);
     }
 }

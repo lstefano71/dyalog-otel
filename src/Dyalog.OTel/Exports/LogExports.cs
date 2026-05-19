@@ -12,20 +12,22 @@ namespace Dyalog.OTel.Exports;
 public static class LogExports
 {
     /// <summary>
-    /// pp_otel_log pipeline severity message templateName attrs
+    /// pp_otel_log pipeline severity message emitter templateName attrs
     ///
     /// If message contains {Placeholders}, attrs are treated as positional fillers.
     /// If message is plain text, attrs are key-value pairs.
+    /// emitter: scope name (empty string = pipeline default).
     /// templateName can be empty string for no template.
     /// </summary>
     [DwaExport("pp_otel_log")]
-    public static void Log(int pipeline, int severity, Localp msg, Localp templateName, Localp attrs)
+    public static void Log(int pipeline, int severity, Localp msg, Localp emitter, Localp templateName, Localp attrs)
     {
         var pipe = PipelineRegistry.Resolve(pipeline);
         if (pipe == null) return;
 
         long timestamp = Pipeline.Pipeline.GetTimestampNano();
         string body = msg.HasValue ? msg.ReadString() : "";
+        string emitterName = ExportHelpers.ReadOptionalString(emitter);
         string tplName = ExportHelpers.ReadOptionalString(templateName);
         int attrCount = attrs.HasValue ? attrs.Bound() : 0;
 
@@ -60,6 +62,7 @@ public static class LogExports
             Body = parsed?.HasPlaceholders == true && attributes != null
                 ? parsed.Render(attributes)
                 : body,
+            Emitter = emitterName,
             Template = snapshot,
             Attributes = attributes
         };
@@ -68,18 +71,19 @@ public static class LogExports
     }
 
     /// <summary>
-    /// pp_otel_log_span pipeline severity message spanHandle templateName attrs
+    /// pp_otel_log_span pipeline severity message spanHandle emitter templateName attrs
     ///
     /// Like pp_otel_log but correlates with an active span (log↔span correlation).
     /// </summary>
     [DwaExport("pp_otel_log_span")]
-    public static void LogWithSpan(int pipeline, int severity, Localp msg, int spanHandle, Localp templateName, Localp attrs)
+    public static void LogWithSpan(int pipeline, int severity, Localp msg, int spanHandle, Localp emitter, Localp templateName, Localp attrs)
     {
         var pipe = PipelineRegistry.Resolve(pipeline);
         if (pipe == null) return;
 
         long timestamp = Pipeline.Pipeline.GetTimestampNano();
         string body = msg.HasValue ? msg.ReadString() : "";
+        string emitterName = ExportHelpers.ReadOptionalString(emitter);
         string tplName = ExportHelpers.ReadOptionalString(templateName);
         int attrCount = attrs.HasValue ? attrs.Bound() : 0;
 
@@ -120,6 +124,7 @@ public static class LogExports
                 : body,
             TraceId = traceId,
             SpanId = spanId,
+            Emitter = emitterName,
             Template = snapshot,
             Attributes = attributes
         };

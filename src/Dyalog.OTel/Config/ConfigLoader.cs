@@ -32,6 +32,14 @@ public static class ConfigLoader
         return config;
     }
 
+    /// <summary>Load config from a specific INI file (for testing).</summary>
+    public static OTelConfig LoadFromFile(string path)
+    {
+        var config = new OTelConfig();
+        ApplyIniFile(config, path);
+        return config;
+    }
+
     private static string? FindConfigFile()
     {
         // 1. Explicit env var
@@ -99,6 +107,26 @@ public static class ConfigLoader
                 config.Batch.MetricSize = metricSize;
             if (batchSection.TryGetValue("metric.interval", out var mi) && int.TryParse(mi, out var metricInterval))
                 config.Batch.MetricIntervalMs = metricInterval;
+        }
+
+        // [pipeline] section
+        if (ini.TryGetValue("pipeline", out var pipelineSection))
+        {
+            if (pipelineSection.TryGetValue("emitter", out var emitter))
+                config.DefaultEmitter = emitter;
+            if (pipelineSection.TryGetValue("emitter.version", out var emitterVersion))
+                config.DefaultEmitterVersion = emitterVersion;
+        }
+
+        // [emitter.*] sections
+        foreach (var (sectionName, props) in ini)
+        {
+            if (!sectionName.StartsWith("emitter.", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string emitterName = sectionName["emitter.".Length..];
+            if (props.TryGetValue("version", out var version))
+                config.EmitterRegistry[emitterName] = version;
         }
     }
 

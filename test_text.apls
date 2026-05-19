@@ -16,8 +16,8 @@ _←1 ⎕NDELETE 'test-output.log'
 
 ⎕NA dll,'|pp_otel_init >PP'
 ⎕NA dll,'|pp_otel_status I4 >PP'
-⎕NA dll,'|pp_otel_log I4 I4 <PP <PP <PP'
-⎕NA dll,'|pp_otel_metric I4 <PP <PP I4 <PP <PP'
+⎕NA dll,'|pp_otel_log I4 I4 <PP <PP <PP <PP'
+⎕NA dll,'|pp_otel_metric I4 <PP <PP I4 <PP <PP <PP'
 ⎕NA dll,'|pp_otel_flush I4'
 ⎕NA dll,'|pp_otel_shutdown I4'
 ⎕NA dll,'|pp_otel_tpl_create I4 <PP <PP'
@@ -35,15 +35,15 @@ _←check 'template create (no error)' 1 1
 
 ⎕←'Logs:'
 multiline←'Batch step 1',(⎕UCS 10),'Batch step 2'
-pp_otel_log 0 9 'Starting text destination demo' 'srv' ⍬
-pp_otel_log 0 13 'Configuration uses demo values' 'srv' ⍬
-pp_otel_log 0 9 'Calculator ready' 'cal' ('worker' 'calc-1' 'cycle' 1)
-pp_otel_log 0 9 multiline 'cal' ⍬
+pp_otel_log 0 9 'Starting text destination demo' '' 'srv' ⍬
+pp_otel_log 0 13 'Configuration uses demo values' '' 'srv' ⍬
+pp_otel_log 0 9 'Calculator ready' '' 'cal' ('worker' 'calc-1' 'cycle' 1)
+pp_otel_log 0 9 multiline '' 'cal' ⍬
 _←check 'logs emitted (no error)' 1 1
 
 ⎕←'Histogram metrics:'
 :For v :In 45 80 120 300 55 200
-    pp_otel_metric 0 'request.duration' (,v) 2 'cal' ⍬
+    pp_otel_metric 0 'request.duration' (,v) 2 '' 'cal' ⍬
 :EndFor
 _←check 'histogram metrics emitted (no error)' 1 1
 

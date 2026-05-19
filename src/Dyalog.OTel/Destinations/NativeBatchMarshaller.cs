@@ -24,7 +24,8 @@ internal static unsafe class NativeBatchMarshaller
                 TraceId = EncodeBytes(allocations, record.TraceId),
                 SpanId = EncodeBytes(allocations, record.SpanId),
                 Attributes = EncodeAttributes(allocations, record.Template, record.Attributes, out int attributeCount),
-                AttributeCount = attributeCount
+                AttributeCount = attributeCount,
+                Emitter = EncodeUtf8(allocations, record.Emitter)
             };
         }
 
@@ -48,7 +49,8 @@ internal static unsafe class NativeBatchMarshaller
                 EndTimeUnixNano = record.EndTimeUnixNano,
                 StatusCode = record.StatusCode,
                 Attributes = EncodeAttributes(allocations, record.Template, record.Attributes, out int attributeCount),
-                AttributeCount = attributeCount
+                AttributeCount = attributeCount,
+                Emitter = EncodeUtf8(allocations, record.Emitter)
             };
         }
 
@@ -69,7 +71,8 @@ internal static unsafe class NativeBatchMarshaller
                 Value = record.Value,
                 Type = (int)record.Type,
                 Attributes = EncodeAttributes(allocations, record.Template, record.Attributes, out int attributeCount),
-                AttributeCount = attributeCount
+                AttributeCount = attributeCount,
+                Emitter = EncodeUtf8(allocations, record.Emitter)
             };
         }
 

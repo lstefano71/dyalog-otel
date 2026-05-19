@@ -26,7 +26,8 @@ public static unsafe class JsonlDestinationExports
             WriteRawHistogramMetrics = null,
             Flush = &Flush,
             Shutdown = &Shutdown,
-            Destroy = &Destroy
+            Destroy = &Destroy,
+            SetEmitterConfig = null
         };
         return (nint)api;
     }

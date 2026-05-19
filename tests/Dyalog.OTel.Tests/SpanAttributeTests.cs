@@ -17,7 +17,7 @@ public class SpanAttributeTests
         pipeline.Start();
 
         var startAttrs = new OTelAttribute[] { new("region", "us-east") };
-        int handle = pipeline.StartSpan("test-op", 0, null, startAttrs);
+        int handle = pipeline.StartSpan("test-op", 0, null, null, startAttrs);
         pipeline.EndSpan(handle, null, null);
 
         pipeline.Flush();
@@ -41,7 +41,7 @@ public class SpanAttributeTests
         var startAttrs = new OTelAttribute[] { new("status", "pending"), new("region", "us-east") };
         var endAttrs = new OTelAttribute[] { new("status", "complete") };
 
-        int handle = pipeline.StartSpan("test-op", 0, null, startAttrs);
+        int handle = pipeline.StartSpan("test-op", 0, null, null, startAttrs);
         pipeline.EndSpan(handle, endAttrs, null);
 
         pipeline.Flush();
@@ -93,7 +93,7 @@ public class SpanAttributeTests
         });
 
         var tpl = pipeline.Templates.TryGet("my-tpl");
-        int handle = pipeline.StartSpan("tpl-op", 0, null, null, tpl);
+        int handle = pipeline.StartSpan("tpl-op", 0, null, null, null, tpl);
         pipeline.EndSpan(handle, null, null); // No end template
 
         pipeline.Flush();

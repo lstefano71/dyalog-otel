@@ -93,8 +93,8 @@ A set of attributes describing the entity producing telemetry (service name, hos
 _Avoid_: metadata, identity
 
 **Emitter**:
-A short per-signal code naming the logical producer within a resource, such as `SRV` or `CAL`.
-_Avoid_: component, resource, filename
+A named logical producer within a resource (e.g. `'app.calc'`, `'app.io'`). Maps to OTLP InstrumentationScope.name on the wire. The same string appears as the source/category in dashboards and as the origin label in text destinations. Passed as a per-call parameter to signal exports (empty string = pipeline default). Version is resolved from the emitter registry at serialization time.
+_Avoid_: component, scope (overloaded in OTel), source, category
 
 **Summary block**:
 A periodic human-readable text group synthesized by a destination from aggregated metrics rather than emitted directly by application code.

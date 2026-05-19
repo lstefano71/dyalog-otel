@@ -11,12 +11,13 @@ namespace Dyalog.OTel.Exports;
 public static class MetricExports
 {
     /// <summary>
-    /// pp_otel_metric pipeline metricName value metricType templateName attrs
+    /// pp_otel_metric pipeline metricName value metricType emitter templateName attrs
     ///
     /// metricType: 0=Counter, 1=Gauge, 2=Histogram
+    /// emitter: scope name (empty string = pipeline default)
     /// </summary>
     [DwaExport("pp_otel_metric")]
-    public static void Metric(int pipeline, Localp metricName, Localp value, int metricType, Localp templateName, Localp attrs)
+    public static void Metric(int pipeline, Localp metricName, Localp value, int metricType, Localp emitter, Localp templateName, Localp attrs)
     {
         var pipe = PipelineRegistry.Resolve(pipeline);
         if (pipe == null) return;
@@ -24,6 +25,7 @@ public static class MetricExports
         long timestamp = Pipeline.Pipeline.GetTimestampNano();
         string name = metricName.HasValue ? metricName.ReadString() : "unnamed";
         double val = ExportHelpers.ReadFirstDouble(value);
+        string emitterName = ExportHelpers.ReadOptionalString(emitter);
         string tplName = ExportHelpers.ReadOptionalString(templateName);
 
         TemplateSnapshot? snapshot = null;
@@ -40,6 +42,7 @@ public static class MetricExports
             Name = name,
             Value = val,
             Type = (MetricType)metricType,
+            Emitter = emitterName,
             Template = snapshot,
             Attributes = attributes
         };

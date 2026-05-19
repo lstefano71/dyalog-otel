@@ -13,6 +13,15 @@ public sealed class OTelConfig
 
     /// <summary>Batch configuration per signal type.</summary>
     public BatchConfig Batch { get; set; } = new();
+
+    /// <summary>Default emitter name (InstrumentationScope.name). Fallback: "dyalog-otel".</summary>
+    public string DefaultEmitter { get; set; } = "dyalog-otel";
+
+    /// <summary>Default emitter version (InstrumentationScope.version). Fallback: library assembly version.</summary>
+    public string DefaultEmitterVersion { get; set; } = "";
+
+    /// <summary>Registered emitter name → version mappings for lazily-loaded components.</summary>
+    public Dictionary<string, string> EmitterRegistry { get; set; } = new(StringComparer.Ordinal);
 }
 
 public sealed class DestinationConfig

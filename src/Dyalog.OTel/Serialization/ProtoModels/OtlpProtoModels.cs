@@ -18,10 +18,10 @@ public partial class ProtoResource
 public partial class ProtoInstrumentationScope
 {
     [ProtoMember(1)]
-    public string Name { get; set; } = "dyalog-otel";
+    public string Name { get; set; } = "";
 
     [ProtoMember(2)]
-    public string Version { get; set; } = "0.1.0";
+    public string Version { get; set; } = "";
 
     [ProtoMember(3)]
     public List<ProtoKeyValue> Attributes { get; set; } = new();

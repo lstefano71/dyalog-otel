@@ -46,6 +46,7 @@ public unsafe struct NativeLogRecord
     public ByteSpan SpanId;
     public NativeAttribute* Attributes;
     public int AttributeCount;
+    public Utf8Span Emitter;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -60,6 +61,7 @@ public unsafe struct NativeSpanRecord
     public int StatusCode;
     public NativeAttribute* Attributes;
     public int AttributeCount;
+    public Utf8Span Emitter;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -71,4 +73,5 @@ public unsafe struct NativeMetricPoint
     public int Type;
     public NativeAttribute* Attributes;
     public int AttributeCount;
+    public Utf8Span Emitter;
 }

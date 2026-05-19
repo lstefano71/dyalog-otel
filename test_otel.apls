@@ -37,44 +37,44 @@ _←check 'status is healthy' 0 st
 
 ⍝ --- Log (plain text, no template, no attrs) ---
 ⎕←'Log:'
-⎕NA dll,'|pp_otel_log I4 I4 <PP <PP <PP'
-pp_otel_log 0 9 'Hello from APL' '' ⍬
+⎕NA dll,'|pp_otel_log I4 I4 <PP <PP <PP <PP'
+pp_otel_log 0 9 'Hello from APL' '' '' ⍬
 _←check 'log plain (no error)' 1 1
 
 ⍝ --- Log with placeholder-looking body but no fillers ---
-pp_otel_log 0 9 'Raw {Name}' '' ⍬
+pp_otel_log 0 9 'Raw {Name}' '' '' ⍬
 _←check 'log raw placeholder (no error)' 1 1
 
 ⍝ --- Log with message template ---
 ⎕←'Log with template:'
-pp_otel_log 0 9 'Order {OrderId} placed for {Amount}' '' (42 99.5)
+pp_otel_log 0 9 'Order {OrderId} placed for {Amount}' '' '' (42 99.5)
 _←check 'log template (no error)' 1 1
 
 ⍝ --- Log with key-value attributes ---
-pp_otel_log 0 9 'Event with attrs' '' ('user' 'alice')
+pp_otel_log 0 9 'Event with attrs' '' '' ('user' 'alice')
 _←check 'log attrs (no error)' 1 1
 
 ⍝ --- Span start/end ---
 ⎕←'Span:'
-⎕NA dll,'|pp_otel_span_start I4 <PP I4 <PP <PP >PP'
+⎕NA dll,'|pp_otel_span_start I4 <PP I4 <PP <PP <PP >PP'
 ⎕NA dll,'|pp_otel_span_end I4 I4 <PP <PP'
-sh←pp_otel_span_start 0 'test-operation' 0 '' ⍬ 0
+sh←pp_otel_span_start 0 'test-operation' 0 '' '' ⍬ 0
 _←check 'span handle > 0' 1 (sh>0)
 pp_otel_span_end 0 sh '' ⍬
 _←check 'span end (no error)' 1 1
 
 ⍝ --- Log correlated with span ---
 ⎕←'Log + Span correlation:'
-⎕NA dll,'|pp_otel_log_span I4 I4 <PP I4 <PP <PP'
-sh2←pp_otel_span_start 0 'parent-op' 0 '' ⍬ 0
-pp_otel_log_span 0 9 'Event inside span' sh2 '' ⍬
+⎕NA dll,'|pp_otel_log_span I4 I4 <PP I4 <PP <PP <PP'
+sh2←pp_otel_span_start 0 'parent-op' 0 '' '' ⍬ 0
+pp_otel_log_span 0 9 'Event inside span' sh2 '' '' ⍬
 _←check 'log_span (no error)' 1 1
 pp_otel_span_end 0 sh2 '' ⍬
 
 ⍝ --- Nested spans ---
 ⎕←'Nested spans:'
-root←pp_otel_span_start 0 'root' 0 '' ⍬ 0
-child←pp_otel_span_start 0 'child' root '' ⍬ 0
+root←pp_otel_span_start 0 'root' 0 '' '' ⍬ 0
+child←pp_otel_span_start 0 'child' root '' '' ⍬ 0
 _←check 'child handle ≠ root' 1 (child≠root)
 pp_otel_span_end 0 child '' ⍬
 pp_otel_span_end 0 root '' ⍬
@@ -82,12 +82,12 @@ _←check 'nested spans (no error)' 1 1
 
 ⍝ --- Metric ---
 ⎕←'Metric:'
-⎕NA dll,'|pp_otel_metric I4 <PP <PP I4 <PP <PP'
-pp_otel_metric 0 'requests.count' (,1) 0 '' ⍬
+⎕NA dll,'|pp_otel_metric I4 <PP <PP I4 <PP <PP <PP'
+pp_otel_metric 0 'requests.count' (,1) 0 '' '' ⍬
 _←check 'counter (no error)' 1 1
-pp_otel_metric 0 'cpu.usage' (,72.5) 1 '' ⍬
+pp_otel_metric 0 'cpu.usage' (,72.5) 1 '' '' ⍬
 _←check 'gauge (no error)' 1 1
-pp_otel_metric 0 'request.duration' (,150.3) 2 '' ⍬
+pp_otel_metric 0 'request.duration' (,150.3) 2 '' '' ⍬
 _←check 'histogram (no error)' 1 1
 
 ⍝ --- Stats ---
@@ -109,7 +109,7 @@ pp_otel_tpl_create 0 'base' ('service' 'OrderService' 'version' '1.0')
 _←check 'tpl create (no error)' 1 1
 
 ⍝ --- Log with template name ---
-pp_otel_log 0 9 'Using template' 'base' ⍬
+pp_otel_log 0 9 'Using template' '' 'base' ⍬
 _←check 'log with tpl name (no error)' 1 1
 
 ⍝ --- Template delete ---
